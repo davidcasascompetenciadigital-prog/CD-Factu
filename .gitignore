@@ -1,0 +1,17 @@
+# Build / dist
+build/
+dist/
+*.spec
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Data / local
+*.db
+*.sqlite
+appdata/
+
+# Assets keep? keep assets
+"
