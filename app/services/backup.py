@@ -1,5 +1,5 @@
 # app/services/backup.py
-import shutil, datetime, glob
+import shutil, datetime
 from pathlib import Path
 from ..config import DB_PATH, BACKUP_DIR
 
@@ -10,9 +10,11 @@ def backup_semanal() -> Path:
     shutil.copy2(DB_PATH, destino)
     return destino
 
+
 def listar_backups():
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     return sorted(BACKUP_DIR.glob("backup_*.db"), reverse=True)
+
 
 def restaurar_backup(path: Path) -> bool:
     """Restaura la BD desde un archivo de backup. Devuelve True si OK."""

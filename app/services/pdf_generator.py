@@ -5,6 +5,7 @@ from reportlab.lib.units import mm
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, PageBreak
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 import os
+from xml.sax.saxutils import escape
 
 def _estilos():
     styles = getSampleStyleSheet()
@@ -12,7 +13,15 @@ def _estilos():
     normal = ParagraphStyle("normal", parent=styles["Normal"], fontSize=11, leading=14)
     return title, normal
 
-def _bloque_factura(story, factura, empresa, cliente, lineas, desglose, qr_path, title, normal):
+def _concepto_paragraph(concepto, estilo):
+    """Primera linea = titulo (negrita); el resto = descripcion, con saltos de linea."""
+    partes = (concepto or "").split("\n", 1)
+    html = f"<b>{escape(partes[0])}</b>"
+    if len(partes) > 1 and partes[1].strip():
+        html += "<br/>" + escape(partes[1].strip()).replace("\n", "<br/>")
+    return Paragraph(html, estilo)
+
+def _bloque_factura(story, factura, empresa, cliente, lineas, desglose, qr_path, title, normal, leyenda_qr=None):
     # Cabecera empresa
     if empresa.logo_path and os.path.exists(empresa.logo_path):
         story.append(Image(empresa.logo_path, width=40*mm, height=20*mm))
@@ -39,12 +48,13 @@ def _bloque_factura(story, factura, empresa, cliente, lineas, desglose, qr_path,
     story.append(Spacer(1, 6*mm))
 
     # Tabla de líneas
+    celda = ParagraphStyle("celda", parent=normal, fontSize=10, leading=12)
     data = [["Concepto", "Cant.", "Precio", "Dto.%", "IVA %", "Total"]]
     total_descuento = 0.0
     for l in lineas:
         desc = getattr(l, "descuento", 0.0) or 0.0
         total_descuento += l.cantidad * l.importe_base * desc / 100.0
-        data.append([l.concepto, f"{l.cantidad:g}", f"{l.importe_base:.2f} €",
+        data.append([_concepto_paragraph(l.concepto, celda), f"{l.cantidad:g}", f"{l.importe_base:.2f} €",
                     f"{desc:g}%", f"{l.porcentaje_iva:.0f}%", f"{l.total_linea:.2f} €"])
     t = Table(data, colWidths=[60*mm, 15*mm, 22*mm, 18*mm, 18*mm, 25*mm])
     t.setStyle(TableStyle([
@@ -52,6 +62,7 @@ def _bloque_factura(story, factura, empresa, cliente, lineas, desglose, qr_path,
         ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
         ("GRID", (0,0), (-1,-1), 0.5, colors.grey),
         ("ALIGN", (1,0), (-1,-1), "RIGHT"),
+        ("VALIGN", (0,0), (-1,-1), "TOP"),
         ("FONTSIZE", (0,0), (-1,-1), 10),
     ]))
     story.append(t)
@@ -65,32 +76,11 @@ def _bloque_factura(story, factura, empresa, cliente, lineas, desglose, qr_path,
     story.append(Paragraph(f"<b>Base imponible total: {factura.base_imponible:.2f} €</b>", normal))
     story.append(Paragraph(f"<b>Total descuento: {total_descuento:.2f} €</b>", normal))
     story.append(Paragraph(f"<b>Total factura: {factura.total_factura:.2f} €</b>", title))
-
-    # Cobros
-    story.append(Spacer(1, 6*mm))
-    story.append(Paragraph("<b>Cobros:</b>", normal))
-    estado = getattr(factura, "estado_cobro", "no_cobrada") or "no_cobrada"
-    etiqueta_estado = {"pagada": "Pagada", "parcial": "Parcial", "no_cobrada": "Pendiente"}.get(estado, estado)
-    pendiente = getattr(factura, "pendiente", 0.0) or 0.0
-    story.append(Paragraph(f"Estado de cobro: {etiqueta_estado}", normal))
-    story.append(Paragraph(f"Pendiente de cobro: {pendiente:.2f} €", normal))
-    cobros = getattr(factura, "cobros", None) or []
-    if cobros:
-        data_c = [["Fecha", "Importe", "Forma de pago"]]
-        for c in cobros:
-            data_c.append([str(c.get("fecha", c.get("fecha_cobro", ""))),
-                          f"{float(c.get('importe', 0)):.2f} €",
-                          str(c.get("forma_pago", c.get("forma", "")))])
-        tc = Table(data_c, colWidths=[40*mm, 30*mm, 60*mm])
-        tc.setStyle(TableStyle([
-            ("BACKGROUND", (0,0), (-1,0), colors.lightgrey),
-            ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
-            ("GRID", (0,0), (-1,-1), 0.5, colors.grey),
-            ("FONTSIZE", (0,0), (-1,-1), 9),
-        ]))
-        story.append(tc)
-    else:
-        story.append(Paragraph("Sin cobros registrados.", normal))
+    retencion = getattr(factura, "retencion_irpf", 0) or 0
+    if retencion:
+        pct = getattr(factura, "retencion_pct", 0) or 0
+        story.append(Paragraph(f"Retención IRPF ({pct:g}%): −{retencion:.2f} €", normal))
+        story.append(Paragraph(f"<b>Total a cobrar del cliente: {factura.total_factura - retencion:.2f} €</b>", title))
 
     # Registro Mercantil
     reg = getattr(empresa, "registro_mercantil", None)
@@ -101,16 +91,38 @@ def _bloque_factura(story, factura, empresa, cliente, lineas, desglose, qr_path,
     story.append(Spacer(1, 8*mm))
     if qr_path and os.path.exists(qr_path):
         story.append(Image(qr_path, width=35*mm, height=35*mm))
-        story.append(Paragraph("Código de verificación (Verifactu)", normal))
+        if leyenda_qr:
+            story.append(Paragraph("<b>VERI*FACTU</b>", normal))
+            story.append(Paragraph(leyenda_qr, normal))
+        else:
+            story.append(Paragraph("Código de verificación (Verifactu)", normal))
 
-def generar_pdf_factura(factura, empresa, cliente, lineas, desglose, qr_path, destino_path) -> str:
+def _marca_fn(texto):
+    if not texto:
+        return None
+    def _dibuja(canvas, doc):
+        canvas.saveState()
+        canvas.setFont("Helvetica-Bold", 34)
+        canvas.setFillColor(colors.Color(0.85, 0.2, 0.2, alpha=0.18))
+        canvas.translate(A4[0] / 2, A4[1] / 2)
+        canvas.rotate(45)
+        canvas.drawCentredString(0, 0, texto)
+        canvas.restoreState()
+    return _dibuja
+
+def generar_pdf_factura(factura, empresa, cliente, lineas, desglose, qr_path, destino_path,
+                        leyenda_qr=None, marca=None) -> str:
     doc = SimpleDocTemplate(destino_path, pagesize=A4,
                             leftMargin=15*mm, rightMargin=15*mm,
                             topMargin=15*mm, bottomMargin=15*mm)
     title, normal = _estilos()
     story = []
-    _bloque_factura(story, factura, empresa, cliente, lineas, desglose, qr_path, title, normal)
-    doc.build(story)
+    _bloque_factura(story, factura, empresa, cliente, lineas, desglose, qr_path, title, normal, leyenda_qr)
+    fn = _marca_fn(marca)
+    if fn:
+        doc.build(story, onFirstPage=fn, onLaterPages=fn)
+    else:
+        doc.build(story)
     return destino_path
 
 def generar_pdf_facturas(lista, destino_path) -> str:
@@ -124,6 +136,7 @@ def generar_pdf_facturas(lista, destino_path) -> str:
         if i > 0:
             story.append(PageBreak())
         _bloque_factura(story, item["factura"], item["empresa"], item["cliente"],
-                        item["lineas"], item["desglose"], item["qr_path"], title, normal)
+                        item["lineas"], item["desglose"], item["qr_path"], title, normal,
+                        item.get("leyenda_qr"))
     doc.build(story)
     return destino_path

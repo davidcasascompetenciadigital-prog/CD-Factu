@@ -110,7 +110,8 @@ class VisorFacturaDialog(QDialog):
         if not path:
             return
         generar_pdf_factura(self.data["factura"], self.data["empresa"], self.data["cliente"],
-                          self.data["lineas"], self.data["desglose"], self.data["qr_path"], path)
+                          self.data["lineas"], self.data["desglose"], self.data["qr_path"], path,
+                          leyenda_qr=self.data.get("leyenda_qr"))
         info(self, "PDF generado. Todo correcto.")
         try:
             os.startfile(path)
@@ -159,7 +160,10 @@ class TabFacturas(QWidget):
         btn_anular = big_button("Anular / Rectificar", "danger")
         btn_anular.clicked.connect(self.anular)
         row.addWidget(btn_anular)
-        btn_export = big_button("Exportar asesor", "secondary")
+        btn_vf = big_button("Verifactu / AEAT", "primary")
+        btn_vf.clicked.connect(self.abrir_verifactu)
+        row.addWidget(btn_vf)
+        btn_export = big_button("Exportar para mi asesor", "secondary")
         btn_export.clicked.connect(self.exportar)
         row.addWidget(btn_export)
         btn_help = big_button("?", "secondary"); btn_help.setFixedWidth(60)
@@ -241,7 +245,6 @@ class TabFacturas(QWidget):
         cliente = conn.execute("SELECT * FROM clientes WHERE id=?", (fr["cliente_id"],)).fetchone()
         lineas = conn.execute("SELECT * FROM lineas_factura WHERE factura_id=? ORDER BY orden", (fid,)).fetchall()
         desglose = conn.execute("SELECT * FROM desglose_iva_factura WHERE factura_id=?", (fid,)).fetchall()
-        cobros = conn.execute("SELECT fecha_cobro, importe, forma_pago FROM cobros WHERE factura_id=? ORDER BY id", (fid,)).fetchall()
         reg = conn.execute("SELECT qr_payload FROM registros_facturacion WHERE factura_id=? LIMIT 1", (fid,)).fetchone()
         emp = conn.execute("SELECT * FROM empresa WHERE id=1").fetchone()
         conn.close()
@@ -250,6 +253,8 @@ class TabFacturas(QWidget):
         f.id = fr["id"]; f.numero = fr["numero"]; f.fecha_emision = fr["fecha_emision"]
         f.base_imponible = fr["base_imponible"]; f.total_iva = fr["total_iva"]
         f.total_factura = fr["total_factura"]
+        f.retencion_irpf = fr["retencion_irpf"] if "retencion_irpf" in fr.keys() else 0
+        f.retencion_pct = round(f.retencion_irpf * 100 / f.base_imponible, 2) if f.base_imponible and f.retencion_irpf else 0
         f.lineas = []
         for l in lineas:
             nl = LineaFactura(concepto=l["concepto"], cantidad=l["cantidad"], importe_base=l["importe_base"],
@@ -258,9 +263,6 @@ class TabFacturas(QWidget):
             nl.base_linea = l["base_linea"]; nl.iva_linea = l["iva_linea"]; nl.total_linea = l["total_linea"]
             f.lineas.append(nl)
         f.desglose_iva = {d["porcentaje"]: (d["base"], d["cuota"]) for d in desglose}
-        f.estado_cobro = fr["estado_cobro"]
-        f.pendiente = fr["pendiente"]
-        f.cobros = [{"fecha": c["fecha_cobro"], "importe": c["importe"], "forma_pago": c["forma_pago"]} for c in cobros]
 
         class C: pass
         c = C()
@@ -281,10 +283,16 @@ class TabFacturas(QWidget):
 
         qr_path = FACTURAS_DIR / fr["fecha_emision"][:4] / f"{fr['numero']}.png"
         qr_path.parent.mkdir(parents=True, exist_ok=True)
-        if reg:
+        leyenda = None
+        from ..services import verifactu as vf
+        qr_vf, _ent = vf.qr_url_registrado(fid)
+        if qr_vf:   # factura registrada en Verifactu: QR oficial de cotejo
+            generar_qr_png(qr_vf, qr_path)
+            leyenda = vf.LEYENDA_QR
+        elif reg:
             generar_qr_png(reg["qr_payload"], qr_path)
         return {"factura": f, "empresa": e, "cliente": c, "lineas": f.lineas,
-                "desglose": f.desglose_iva, "qr_path": str(qr_path)}
+                "desglose": f.desglose_iva, "qr_path": str(qr_path), "leyenda_qr": leyenda}
 
     def imprimir_factura_doble(self, item):
         data = item.data(Qt.ItemDataRole.UserRole) if item else None
@@ -302,7 +310,8 @@ class TabFacturas(QWidget):
         path, _ = QFileDialog.getSaveFileName(self, "Guardar PDF", f"{d['factura'].numero}.pdf", "PDF (*.pdf)")
         if not path:
             return
-        generar_pdf_factura(d["factura"], d["empresa"], d["cliente"], d["lineas"], d["desglose"], d["qr_path"], path)
+        generar_pdf_factura(d["factura"], d["empresa"], d["cliente"], d["lineas"], d["desglose"], d["qr_path"], path,
+                            leyenda_qr=d.get("leyenda_qr"))
         info(self, "PDF generado. Todo correcto.")
         try:
             os.startfile(path)
@@ -418,6 +427,35 @@ class TabFacturas(QWidget):
         conn.commit()
         conn.close()
         info(self, "Factura anulada. Todo correcto.")
+        self.refrescar()
+        self._anulacion_verifactu(fid)
+
+    def _anulacion_verifactu(self, fid):
+        """Si la factura estaba registrada en Verifactu, genera el registro de anulacion (encadenado)."""
+        try:
+            from ..services import verifactu as vf
+            regs = vf.registros_de_factura(fid)
+            for ent in ("real", "pruebas"):
+                tiene_alta = any(r["entorno"] == ent and r["tipo"] == "alta" and r["estado"] != "incorrecto" for r in regs)
+                ya_anulada = any(r["entorno"] == ent and r["tipo"] == "anulacion" for r in regs)
+                if not tiene_alta or ya_anulada:
+                    continue
+                vf.registrar(fid, ent, "anulacion")
+                nombre = "la AEAT (real)" if ent == "real" else "el entorno de pruebas de la AEAT"
+                if confirm(self, f"La factura estaba registrada en Verifactu. ¿Enviar ahora la anulación a {nombre}?"):
+                    res = vf.enviar_pendientes(ent)
+                    (info if res.get("ok") else error)(self, res.get("mensaje", ""))
+                else:
+                    info(self, "Anulación Verifactu guardada como pendiente. Envíala desde 'Verifactu / AEAT'.")
+        except Exception as e:
+            error(self, f"No se pudo preparar la anulación en Verifactu: {e}")
+
+    def abrir_verifactu(self):
+        data = self._fila_seleccionada()
+        if not data:
+            return
+        from .dialog_verifactu import VerifactuDialog
+        VerifactuDialog(self.parent, data[0]).exec()
         self.refrescar()
 
     def exportar(self):

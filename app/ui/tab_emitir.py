@@ -1,7 +1,8 @@
 # app/ui/tab_emitir.py
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
                                QComboBox, QPushButton, QTableWidget, QTableWidgetItem,
-                               QHeaderView, QMessageBox, QDialog, QListWidget, QListWidgetItem)
+                               QHeaderView, QMessageBox, QDialog, QListWidget, QListWidgetItem, QTextEdit,
+                                QFrame, QSizePolicy)
 from PySide6.QtCore import Qt
 from datetime import date
 import os
@@ -118,6 +119,69 @@ class SelectorProductoDialog(QDialog):
         it = self.lista.currentItem()
         return it.data(Qt.ItemDataRole.UserRole) if it else None
 
+class SelectorServicioDialog(QDialog):
+    """Elige un servicio y permite ajustar su descripcion antes de anadirlo a la factura."""
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowTitle("Elegir servicio")
+        self.setMinimumSize(640, 520)
+        v = QVBoxLayout(self)
+        self.lista = QListWidget()
+        self.lista.setMaximumHeight(170)
+        v.addWidget(self.lista)
+        v.addWidget(QLabel("Descripción en la factura (puedes editarla solo para esta factura):"))
+        self.txt = QTextEdit()
+        self.txt.setAcceptRichText(False)
+        v.addWidget(self.txt, 1)
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Importe base (sin IVA):"))
+        self.inp_base = QLineEdit()
+        row.addWidget(self.inp_base)
+        row.addWidget(QLabel("€"))
+        v.addLayout(row)
+        btn = big_button("Añadir a la factura", "primary")
+        btn.clicked.connect(self._aceptar)
+        v.addWidget(btn)
+        conn = get_connection()
+        rows = conn.execute("""SELECT s.id, s.titulo, s.descripcion, s.importe_base, t.porcentaje, t.id AS iva_id
+                               FROM servicios s LEFT JOIN tipos_iva t ON t.id=s.tipo_iva_id
+                               WHERE s.activo=1 ORDER BY s.titulo""").fetchall()
+        conn.close()
+        for r in rows:
+            d = dict(r)
+            if d["porcentaje"] is None:
+                d["porcentaje"] = 21.0
+            item = QListWidgetItem(f"{d['titulo']}  |  {d['importe_base']:.2f} €  |  IVA {d['porcentaje']:g}%")
+            item.setData(Qt.ItemDataRole.UserRole, d)
+            self.lista.addItem(item)
+        self.lista.currentItemChanged.connect(self._cambio)
+        self._sel = None
+
+    def _cambio(self, cur, prev):
+        if not cur:
+            return
+        d = cur.data(Qt.ItemDataRole.UserRole)
+        self._sel = d
+        self.txt.setPlainText(d["descripcion"] or "")
+        self.inp_base.setText(f"{d['importe_base']:.2f}".replace(".", ","))
+
+    def _aceptar(self):
+        if not self._sel:
+            error(self, "Elige un servicio de la lista.")
+            return
+        try:
+            float(self.inp_base.text().replace(",", "."))
+        except ValueError:
+            error(self, "El importe base debe ser un número.")
+            return
+        self.accept()
+
+    def resultado(self):
+        d = dict(self._sel)
+        d["descripcion"] = self.txt.toPlainText().strip()
+        d["importe_base"] = float(self.inp_base.text().replace(",", "."))
+        return d
+
 class TabEmitir(QWidget):
     def __init__(self, parent):
         super().__init__(parent)
@@ -133,11 +197,31 @@ class TabEmitir(QWidget):
         left.setSpacing(10)
         left.addWidget(title_label("Emitir factura"))
 
-        # 1. Cliente
+        # 1. Cliente: búsqueda inline + botón de listado (autor)
         left.addWidget(QLabel("1. Cliente:"))
-        btn_listado = big_button("Listado de clientes", "primary")
+        self.lbl_cliente = QLabel("Ningún cliente seleccionado")
+        self.lbl_cliente.setStyleSheet(
+            "font-size:16px; padding:8px; background:#2a2a2a; border:1px solid #3a3a3a; border-radius:6px;")
+        left.addWidget(self.lbl_cliente)
+        self.inp_buscar_cliente = QLineEdit()
+        self.inp_buscar_cliente.setPlaceholderText("Buscar cliente (nombre, CIF, email, teléfono)...")
+        self.inp_buscar_cliente.textChanged.connect(self.filtrar_clientes)
+        left.addWidget(self.inp_buscar_cliente)
+        self.lista_clientes = QListWidget()
+        self.lista_clientes.setMaximumHeight(150)
+        self.lista_clientes.itemClicked.connect(self.seleccionar_cliente_lista)
+        left.addWidget(self.lista_clientes)
+        self._clientes = []
+        self.cargar_clientes()
+        row = QHBoxLayout()
+        btn_listado = big_button("Listado de clientes", "secondary")
         btn_listado.clicked.connect(self.abrir_listado_clientes)
-        left.addWidget(btn_listado)
+        row.addWidget(btn_listado)
+        btn_sel = big_button("Elegir cliente", "primary")
+        btn_sel.clicked.connect(self.elegir_cliente)
+        row.addWidget(btn_sel)
+        row.addStretch()
+        left.addLayout(row)
 
         # 2. Líneas
         left.addWidget(QLabel("2. Líneas de factura:"))
@@ -145,6 +229,9 @@ class TabEmitir(QWidget):
         btn_prod = big_button("Añadir producto", "primary")
         btn_prod.clicked.connect(self.add_producto)
         row.addWidget(btn_prod)
+        btn_serv = big_button("Añadir servicio", "primary")
+        btn_serv.clicked.connect(self.add_servicio)
+        row.addWidget(btn_serv)
         btn_manual = big_button("Escribir línea a mano", "secondary")
         btn_manual.clicked.connect(self.add_manual)
         row.addWidget(btn_manual)
@@ -157,31 +244,41 @@ class TabEmitir(QWidget):
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setMinimumHeight(180)
         self.tabla.verticalHeader().setDefaultSectionSize(32)
-        from PySide6.QtWidgets import QSizePolicy
         self.tabla.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         left.addWidget(self.tabla)
-
         left.addStretch()
 
-        # ===== Columna derecha: resumen automático =====
+        # ===== Columna derecha: resumen y opciones =====
         right = QVBoxLayout()
         right.setSpacing(10)
         right.addWidget(QLabel("3. Resumen automático:"))
-        from PySide6.QtWidgets import QFrame
         box = QFrame()
         box.setStyleSheet("background:#1e1e1e; border:1px solid #3a3a3a; border-radius:10px;")
         bv = QVBoxLayout(box)
         bv.setContentsMargins(14, 14, 14, 14)
         self.lbl_base = QLabel("Base imponible total: 0,00 €")
-        self.lbl_iva = QLabel("IVA: 0,00 €")
+        self.lbl_iva = QLabel("IVA total: 0,00 €")
         self.lbl_desglose = QLabel("")
         self.lbl_total = QLabel("Total factura: 0,00 €")
         self.lbl_total.setStyleSheet("font-size:20px; font-weight:bold; color:#4caf50;")
-        for l in (self.lbl_base, self.lbl_iva, self.lbl_desglose, self.lbl_total):
+        self.lbl_retencion = QLabel("Retención: 0,00 € · A cobrar del cliente: 0,00 €")
+        self.lbl_retencion.setStyleSheet("color:#aaaaaa; font-size:13px;")
+        for l in (self.lbl_base, self.lbl_iva, self.lbl_desglose, self.lbl_total, self.lbl_retencion):
             l.setAlignment(Qt.AlignmentFlag.AlignRight)
             bv.addWidget(l)
         bv.addStretch()
         right.addWidget(box)
+
+        # Retención IRPF (la practica el cliente)
+        right.addWidget(QLabel("Retención IRPF (la practica el cliente sobre la base imponible):"))
+        row = QHBoxLayout()
+        self.cmb_retencion = QComboBox()
+        for pct in (0, 7, 15, 19, 20, 21):
+            self.cmb_retencion.addItem(f"{pct}%", pct)
+        row.addWidget(self.cmb_retencion)
+        row.addStretch()
+        right.addLayout(row)
+        self.cmb_retencion.currentIndexChanged.connect(self.recalcular_resumen)
 
         # Datos del cliente seleccionado
         right.addWidget(QLabel("Datos del cliente:"))
@@ -205,64 +302,171 @@ class TabEmitir(QWidget):
         row.addStretch()
         right.addLayout(row)
 
-        # Campos pago (mini-formulario) visibles si cobrada
+        # Campos de pago visibles si está cobrada
         self.pago_frame = QWidget()
         pf = QVBoxLayout(self.pago_frame)
         r = QHBoxLayout()
-        r.addWidget(QLabel("Importe a cobrar:")); self.inp_importe_cobro = QLineEdit(); r.addWidget(self.inp_importe_cobro)
+        r.addWidget(QLabel("Importe a cobrar:"))
+        self.inp_importe_cobro = QLineEdit()
+        r.addWidget(self.inp_importe_cobro)
         pf.addLayout(r)
         r = QHBoxLayout()
-        r.addWidget(QLabel("Forma de pago:")); self.cmb_forma = QComboBox()
-        self.cmb_forma.addItems(["Efectivo","Transferencia","Tarjeta","Bizum","Cheque","Otro"]); r.addWidget(self.cmb_forma)
+        r.addWidget(QLabel("Forma de pago:"))
+        self.cmb_forma = QComboBox()
+        self.cmb_forma.addItems(["Efectivo", "Transferencia", "Tarjeta", "Bizum", "Cheque", "Otro"])
+        r.addWidget(self.cmb_forma)
         pf.addLayout(r)
         r = QHBoxLayout()
-        r.addWidget(QLabel("Fecha:")); self.inp_fecha_cobro = QLineEdit(date.today().isoformat()); r.addWidget(self.inp_fecha_cobro)
+        r.addWidget(QLabel("Fecha:"))
+        self.inp_fecha_cobro = QLineEdit(date.today().isoformat())
+        r.addWidget(self.inp_fecha_cobro)
         pf.addLayout(r)
         self.pago_frame.setVisible(False)
         self.cmb_cobro.currentTextChanged.connect(lambda t: self.pago_frame.setVisible(t != "No cobrada"))
         right.addWidget(self.pago_frame)
 
+        # 5. Verifactu
+        right.addWidget(QLabel("5. Verifactu (Agencia Tributaria):"))
+        row = QHBoxLayout()
+        self.cmb_vf = QComboBox()
+        self.cmb_vf.addItem("No enviar ahora", "no")
+        self.cmb_vf.addItem("Ver vista previa Verifactu (no se envía)", "previa")
+        self.cmb_vf.addItem("Enviar al entorno de PRUEBAS de la AEAT", "pruebas")
+        self.cmb_vf.addItem("Enviar a la AEAT (REAL)", "real")
+        self.cmb_vf.setMinimumWidth(340)
+        row.addWidget(self.cmb_vf)
+        self.lbl_vf = QLabel("")
+        self.lbl_vf.setWordWrap(True)
+        self.lbl_vf.setStyleSheet("color:#aaaaaa; font-size:13px;")
+        row.addWidget(self.lbl_vf)
+        right.addLayout(row)
+        self.cmb_vf.currentIndexChanged.connect(self._aviso_vf)
+        self._vf_por_defecto()
+
         # Botones
         row = QHBoxLayout()
-        btn_emitir = big_button("Emitir", "primary")
+        btn_emitir = big_button("EMITIR FACTURA Y GENERAR PDF", "primary")
         btn_emitir.clicked.connect(self.emitir)
         row.addWidget(btn_emitir)
-        btn_help = big_button("?", "secondary"); btn_help.setFixedWidth(60)
+        btn_help = big_button("?", "secondary")
+        btn_help.setFixedWidth(60)
         btn_help.clicked.connect(lambda: help_popup(self, ayuda("emitir")))
         row.addWidget(btn_help)
         row.addStretch()
         right.addLayout(row)
-
         right.addStretch()
 
         outer.addLayout(left, 2)
         outer.addLayout(right, 1)
 
+    def _vf_por_defecto(self):
+        """Preselecciona según la configuración de empresa (nunca envía sin confirmación)."""
+        try:
+            conn = get_connection()
+            r = conn.execute("SELECT verifactu_enabled, verifactu_mode FROM empresa WHERE id=1").fetchone()
+            conn.close()
+            if r and r["verifactu_enabled"]:
+                data = "real" if r["verifactu_mode"] == "real" else "pruebas"
+                self.cmb_vf.setCurrentIndex(self.cmb_vf.findData(data))
+        except Exception:
+            pass
+        self._aviso_vf()
+
+    def _aviso_vf(self, *_):
+        d = self.cmb_vf.currentData()
+        self.lbl_vf.setText({"no": "Podrás hacerlo después desde «Facturas emitidas».",
+                             "previa": "Se abrirá una vista previa con el QR; no se guarda ni se envía.",
+                             "pruebas": "Sin efectos fiscales. Pide confirmación.",
+                             "real": "Registro REAL en la AEAT. Pide doble confirmación."}.get(d, ""))
+
+    def cargar_clientes(self):
+        conn = get_connection()
+        rows = conn.execute("""SELECT id, nombre, apellidos, empresa, dni_cif, direccion, cp, ciudad
+                               FROM clientes ORDER BY nombre""").fetchall()
+        contacts = conn.execute("SELECT cliente_id, telefono, email FROM contactos_cliente").fetchall()
+        conn.close()
+        contact_map = {}
+        for c in contacts:
+            contact_map.setdefault(c["cliente_id"], []).append((c["telefono"] or "", c["email"] or ""))
+        self._clientes = []
+        for r in rows:
+            ct = contact_map.get(r["id"], [])
+            telefonos = " ".join(t for t, e in ct)
+            emails = " ".join(e for t, e in ct)
+            self._clientes.append({
+                "id": r["id"],
+                "nombre": r["nombre"] or "",
+                "apellidos": r["apellidos"] or "",
+                "empresa": r["empresa"] or "",
+                "dni_cif": r["dni_cif"] or "",
+                "direccion": r["direccion"] or "",
+                "cp": r["cp"] or "",
+                "ciudad": r["ciudad"] or "",
+                "telefonos": telefonos,
+                "emails": emails,
+            })
+        self.filtrar_clientes(self.inp_buscar_cliente.text())
+
+    def _texto_cliente(self, c):
+        return " ".join([c["nombre"], c["apellidos"], c["empresa"], c["dni_cif"],
+                         c["direccion"], c["cp"], c["ciudad"], c["telefonos"], c["emails"]]).lower()
+
+    def filtrar_clientes(self, texto):
+        self.lista_clientes.clear()
+        t = (texto or "").strip().lower()
+        for c in self._clientes:
+            if t and t not in self._texto_cliente(c):
+                continue
+            nombre = (c["nombre"] + " " + c["apellidos"]).strip()
+            if c["empresa"]:
+                nombre += f"  |  Empresa: {c['empresa']}"
+            if c["dni_cif"]:
+                nombre += f"  |  CIF: {c['dni_cif']}"
+            item = QListWidgetItem(nombre)
+            item.setData(Qt.ItemDataRole.UserRole, c["id"])
+            self.lista_clientes.addItem(item)
+
+    def seleccionar_cliente_lista(self, item):
+        cid = item.data(Qt.ItemDataRole.UserRole)
+        if cid is not None:
+            self._set_cliente(cid)
+
+    def elegir_cliente(self):
+        # compatibilidad: abre el primer resultado filtrado
+        if self.lista_clientes.count() > 0:
+            self.seleccionar_cliente_lista(self.lista_clientes.item(0))
+
     def abrir_listado_clientes(self):
         dlg = SelectorClienteDialog(self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             cid = dlg.seleccionado_id()
-            if cid is None: return
-            self.cliente_id = cid
-            conn = get_connection()
-            r = conn.execute("SELECT * FROM clientes WHERE id=?", (cid,)).fetchone()
-            conn.close()
-            self.cliente_data = dict(r)
-            # Datos del cliente en el recuadro derecho
-            conn2 = get_connection()
-            contacts = conn2.execute("SELECT telefono, email FROM contactos_cliente WHERE cliente_id=?", (cid,)).fetchall()
-            conn2.close()
-            tels = ", ".join(c["telefono"] for c in contacts if c["telefono"])
-            emails = ", ".join(c["email"] for c in contacts if c["email"])
-            datos = (f"Nombre: {r['nombre']} {r['apellidos'] or ''}\n"
-                     f"Empresa: {r['empresa'] or '-'}\n"
-                     f"NIF/CIF: {r['dni_cif'] or '-'}\n"
-                     f"Dirección: {r['direccion'] or '-'}\n"
-                     f"CP/Ciudad: {r['cp'] or ''} {r['ciudad'] or ''}\n"
-                     f"Teléfono: {tels or '-'}\n"
-                     f"Email: {emails or '-'}")
-            self.lbl_cli_datos.setText(datos)
+            if cid is not None:
+                self._set_cliente(cid)
 
+    def _set_cliente(self, cid):
+        self.cliente_id = cid
+        conn = get_connection()
+        r = conn.execute("""SELECT id, nombre, apellidos, empresa, dni_cif, direccion, cp, ciudad,
+                            comunidad_autonoma, pais FROM clientes WHERE id=?""", (cid,)).fetchone()
+        contacts = conn.execute("SELECT telefono, email FROM contactos_cliente WHERE cliente_id=?", (cid,)).fetchall()
+        conn.close()
+        if not r:
+            return
+        self.cliente_data = dict(r)
+        tels = ", ".join(c["telefono"] for c in contacts if c["telefono"])
+        emails = ", ".join(c["email"] for c in contacts if c["email"])
+        self.cliente_data["telefonos"] = tels
+        self.cliente_data["emails"] = emails
+        nombre = f"{r['nombre']} {r['apellidos'] or ''}".strip()
+        self.lbl_cliente.setText(nombre + (f"  |  Empresa: {r['empresa']}" if r["empresa"] else ""))
+        datos = (f"Nombre: {nombre}\n"
+                 f"Empresa: {r['empresa'] or '-'}\n"
+                 f"NIF/CIF: {r['dni_cif'] or '-'}\n"
+                 f"Dirección: {r['direccion'] or '-'}\n"
+                 f"CP/Ciudad: {r['cp'] or ''} {r['ciudad'] or ''}\n"
+                 f"Teléfono: {tels or '-'}\n"
+                 f"Email: {emails or '-'}")
+        self.lbl_cli_datos.setText(datos)
 
     def add_producto(self):
         dlg = SelectorProductoDialog(self)
@@ -282,6 +486,19 @@ class TabEmitir(QWidget):
             self.lineas.append(linea)
             self.refrescar_tabla()
             self.recalcular_resumen()
+
+    def add_servicio(self):
+        dlg = SelectorServicioDialog(self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        d = dlg.resultado()
+        concepto = d["titulo"] + (("\n" + d["descripcion"]) if d["descripcion"] else "")
+        linea = LineaFactura(concepto=concepto, cantidad=1.0, importe_base=d["importe_base"],
+                             porcentaje_iva=float(d["porcentaje"]), tipo_iva_id=d["iva_id"])
+        linea.recalcular()
+        self.lineas.append(linea)
+        self.refrescar_tabla()
+        self.recalcular_resumen()
 
     def add_manual(self):
         # mini dialog inline: ask concepto, base, iva
@@ -388,16 +605,19 @@ class TabEmitir(QWidget):
             self.refrescar_tabla()
             self.recalcular_resumen()
 
-    def recalcular_resumen(self):
+    def recalcular_resumen(self, *_):
         f = Factura(lineas=self.lineas)
         f.recalcular_totales()
+        pct = self.cmb_retencion.currentData() or 0
+        f.aplicar_retencion(pct)
         self.lbl_base.setText(f"Base imponible total: {f.base_imponible:.2f} €")
         self.lbl_iva.setText(f"IVA total: {f.total_iva:.2f} €")
         desglose_txt = "  |  ".join(f"IVA {pct:g}%: {cuota:.2f} €" for pct, (b, cuota) in f.desglose_iva.items())
-        # spec: "IVA 21%: 42,00 €"
-        desglose_txt = "  |  ".join(f"IVA {pct:g}%: {cuota:.2f} €" for pct, (b, cuota) in f.desglose_iva.items())
         self.lbl_desglose.setText(desglose_txt)
         self.lbl_total.setText(f"Total factura: {f.total_factura:.2f} €")
+        self.lbl_retencion.setText(
+            f"Retención {pct:g}% ({f.retencion_irpf:.2f} €) · A cobrar del cliente: {f.pendiente:.2f} €"
+        )
         self._totales_cache = f
 
     def emitir(self):
@@ -417,9 +637,11 @@ class TabEmitir(QWidget):
             nl.recalcular()
             f.lineas.append(nl)
         f.recalcular_totales()
+        f.aplicar_retencion(self.cmb_retencion.currentData() or 0)
         # cliente nombre para confirmación
         nombre_cliente = self.cliente_data.get("empresa") or f"{self.cliente_data['nombre']} {self.cliente_data.get('apellidos') or ''}".strip()
-        if not confirm(self, f"Vas a emitir una factura a {nombre_cliente} por {f.total_factura:.2f} €. ¿Es correcto?"):
+        if not confirm(self, f"Vas a emitir una factura a {nombre_cliente} por {f.total_factura:.2f} € "
+                             f"(a cobrar tras la retención: {f.pendiente:.2f} €). ¿Es correcto?"):
             return
         # número de factura
         conn = get_connection()
@@ -441,10 +663,10 @@ class TabEmitir(QWidget):
 
         # insert factura
         cur = conn.execute("""INSERT INTO facturas (numero, fecha_emision, cliente_id, base_imponible, total_iva,
-                              total_factura, estado, estado_cobro, pendiente, hash_registro, hash_anterior)
-                              VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                              total_factura, retencion_irpf, estado, estado_cobro, pendiente, hash_registro, hash_anterior)
+                              VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                            (numero, date.today().isoformat(), self.cliente_id, f.base_imponible,
-                            f.total_iva, f.total_factura, "emitida", "no_cobrada", f.total_factura,
+                            f.total_iva, f.total_factura, f.retencion_irpf, "emitida", "no_cobrada", f.pendiente,
                             hash_reg, hash_anterior))
         factura_id = cur.lastrowid
         # lineas
@@ -499,45 +721,27 @@ class TabEmitir(QWidget):
         e.registro_mercantil = er["registro_mercantil"] if "registro_mercantil" in er.keys() else None
         f.numero = numero
         f.fecha_emision = date.today().isoformat()
-
+        generar_pdf_factura(f, e, c, f.lineas, f.desglose_iva, str(qr_path), str(pdf_path))
+        conn.execute("UPDATE facturas SET pdf_path=? WHERE id=?", (str(pdf_path), factura_id))
         # estado cobro inicial
-        estado_cobro = "no_cobrada"
-        pendiente = f.total_factura
-        cobros_list = []
-        estado_txt = self.cmb_cobro.currentText()
-        if estado_txt == "Cobrada totalmente":
-            imp = f.total_factura
-            fecha_cobro = date.today().isoformat()
+        estado = self.cmb_cobro.currentText()
+        if estado == "Cobrada totalmente":
+            imp = f.pendiente  # el cliente paga la factura menos la retención que le practica
             conn.execute("""INSERT INTO cobros (factura_id, fecha_cobro, importe, forma_pago) VALUES (?,?,?,?)""",
-                         (factura_id, fecha_cobro, imp, self.cmb_forma.currentText()))
-            estado_cobro = "pagada"
-            pendiente = 0.0
-            cobros_list.append({"fecha": fecha_cobro, "importe": imp, "forma_pago": self.cmb_forma.currentText()})
+                         (factura_id, date.today().isoformat(), imp, self.cmb_forma.currentText()))
             conn.execute("UPDATE facturas SET estado_cobro='pagada', pendiente=0 WHERE id=?", (factura_id,))
-        elif estado_txt == "Cobrada parcialmente":
+        elif estado == "Cobrada parcialmente":
             try:
                 imp = float(self.inp_importe_cobro.text().replace(",", "."))
             except ValueError:
                 imp = f.total_factura
-            fecha_cobro = self.inp_fecha_cobro.text() or date.today().isoformat()
             conn.execute("""INSERT INTO cobros (factura_id, fecha_cobro, importe, forma_pago) VALUES (?,?,?,?)""",
-                         (factura_id, fecha_cobro, imp, self.cmb_forma.currentText()))
-            pend = round(f.total_factura - imp, 2)
+                         (factura_id, self.inp_fecha_cobro.text() or date.today().isoformat(),
+                          imp, self.cmb_forma.currentText()))
+            pend = round(f.pendiente - imp, 2)
             nuevo_estado = "pagada" if pend <= 0 else "parcial"
-            estado_cobro = nuevo_estado
-            pendiente = max(pend, 0)
-            cobros_list.append({"fecha": fecha_cobro, "importe": imp, "forma_pago": self.cmb_forma.currentText()})
             conn.execute("UPDATE facturas SET estado_cobro=?, pendiente=? WHERE id=?",
                          (nuevo_estado, max(pend, 0), factura_id))
-        conn.commit()
-
-        # datos de cobro para el PDF
-        f.estado_cobro = estado_cobro
-        f.pendiente = pendiente
-        f.cobros = cobros_list
-
-        generar_pdf_factura(f, e, c, f.lineas, f.desglose_iva, str(qr_path), str(pdf_path))
-        conn.execute("UPDATE facturas SET pdf_path=? WHERE id=?", (str(pdf_path), factura_id))
         conn.commit()
         conn.close()
 
@@ -548,12 +752,15 @@ class TabEmitir(QWidget):
             pass
 
         info(self, MSG_FACTURA_GUARDADA)
+        opcion_vf = self.cmb_vf.currentData()
         # reset
         self.lineas = []
         self.cliente_id = None
         self.cliente_data = None
+        self.lbl_cliente.setText("Ningún cliente seleccionado")
         self.lbl_cli_datos.setText("Ningún cliente seleccionado")
         self.refrescar_tabla()
+        self.cmb_retencion.setCurrentIndex(0)
         self.recalcular_resumen()
         self.cmb_cobro.setCurrentText("No cobrada")
         self.pago_frame.setVisible(False)
@@ -561,5 +768,19 @@ class TabEmitir(QWidget):
         try:
             self.parent.tab_facturas.refrescar()
             self.parent.tab_cobros.refrescar()
+            self.parent.tab_balance.refrescar()
+            self.parent.tab_balance_anual.refrescar()
         except Exception:
             pass
+        # Verifactu segun lo elegido (la factura ya esta emitida y guardada)
+        if opcion_vf != "no":
+            try:
+                from .dialog_verifactu import VerifactuDialog
+                dlg = VerifactuDialog(self.parent, factura_id)
+                if opcion_vf == "previa":
+                    dlg.vista_previa()
+                else:
+                    dlg.enviar(opcion_vf)
+                dlg.exec()
+            except Exception as e:
+                error(self, f"La factura se emitió correctamente, pero Verifactu falló: {e}")

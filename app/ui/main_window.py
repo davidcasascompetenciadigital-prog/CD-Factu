@@ -1,11 +1,11 @@
-﻿# app/ui/main_window.py
+# app/ui/main_window.py
 from PySide6.QtWidgets import (QMainWindow, QStackedWidget, QWidget, QVBoxLayout,
                                QHBoxLayout, QLabel, QPushButton, QGridLayout, QMessageBox)
 from PySide6.QtCore import Qt, Slot
 from pathlib import Path
 from PySide6.QtGui import QPixmap, QIcon
 
-from ..config import resource_path, BACKUP_DIR
+from ..config import resource_path, APP_VERSION, BACKUP_DIR
 from ..db.database import get_connection
 from ..ui.styles import GLOBAL_QSS
 from ..ui.widgets import title_label, big_button, help_popup, info
@@ -21,6 +21,10 @@ from .tab_productos import TabProductos
 from .tab_emitir import TabEmitir
 from .tab_cobros import TabCobros
 from .tab_facturas import TabFacturas
+from .tab_servicios import TabServicios
+from .tab_gastos import TabGastos
+from .tab_balance import TabBalance
+from .tab_balance_anual import TabBalanceAnual
 
 PAGES = [
     ("Mis datos de empresa", "tab_empresa"),
@@ -32,35 +36,30 @@ PAGES = [
 ]
 
 class MenuCard(QWidget):
-    """Ficha única: icono + nombre de la función + concepto en un solo recuadro."""
     clicked = None
     def __init__(self, icono, titulo, descripcion, callback):
         super().__init__()
         self.callback = callback
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setStyleSheet("QWidget#card { background:#2a2a2a; border:2px solid #3a3a3a; border-radius:12px; }"
-                          "QWidget#card:hover { border:2px solid #4caf50; }")
-        self.setObjectName("card")
-        h = QHBoxLayout(self)
-        h.setSpacing(14)
-        h.setContentsMargins(16, 12, 16, 12)
+        self.setStyleSheet("QFrame { background:#2a2a2a; border:2px solid #3a3a3a; border-radius:12px; }")
+        v = QVBoxLayout(self)
+        v.setSpacing(6)
+        v.setContentsMargins(16, 16, 16, 16)
         lbl_icon = QLabel(icono)
-        lbl_icon.setStyleSheet("font-size:44px;")
+        lbl_icon.setStyleSheet("font-size:40px;")
         lbl_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_icon.setFixedWidth(60)
-        h.addWidget(lbl_icon)
-        v = QVBoxLayout()
-        v.setSpacing(2)
+        v.addWidget(lbl_icon)
         lbl_tit = QLabel(titulo)
         lbl_tit.setStyleSheet("font-size:18px; font-weight:bold; color:#f5f5f5;")
+        lbl_tit.setAlignment(Qt.AlignmentFlag.AlignCenter)
         v.addWidget(lbl_tit)
         lbl_desc = QLabel(descripcion)
         lbl_desc.setStyleSheet("font-size:13px; color:#aaaaaa;")
+        lbl_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_desc.setWordWrap(True)
         v.addWidget(lbl_desc)
-        h.addLayout(v, 1)
-        self.setMinimumHeight(90)
-        self.setMinimumWidth(320)
+        self.setMinimumHeight(140)
+        self.setMinimumWidth(260)
 
     def mousePressEvent(self, event):
         if self.callback:
@@ -71,9 +70,13 @@ MENU_ITEMS = [
     ("🏢", "Mis datos de empresa", "Configura los datos de tu empresa, IVA y Verifactu.", "tab_empresa"),
     ("👥", "Clientes", "Gestiona tus clientes y sus contactos.", "tab_clientes"),
     ("📦", "Productos", "Crea y edita tus productos y precios.", "tab_productos"),
+    ("🛠️", "Servicios", "Servicios con título y descripción larga para tus facturas.", "tab_servicios"),
     ("🧾", "Emitir factura", "Crea una nueva factura y genera el PDF.", "tab_emitir"),
     ("💰", "Cobros", "Registra los pagos de tus facturas.", "tab_cobros"),
     ("📄", "Facturas emitidas", "Consulta, imprime y gestiona facturas.", "tab_facturas"),
+    ("🧮", "Gastos", "Apunta las facturas que recibes de proveedores.", "tab_gastos"),
+    ("📊", "Balance trimestral", "Ingresos, gastos, cobros e IVA del trimestre (modelo 303).", "tab_balance"),
+    ("📅", "Balance anual", "Resumen anual de IVA (modelo 390) y previsión de IRPF.", "tab_balance_anual"),
 ]
 
 class MainMenu(QWidget):
@@ -82,6 +85,13 @@ class MainMenu(QWidget):
         v = QVBoxLayout(self)
         v.setSpacing(20)
         v.addStretch()
+        lbl_logo = QLabel()
+        pix = QPixmap(str(resource_path("assets/factufacil_logo.png")))
+        if not pix.isNull():
+            lbl_logo.setPixmap(pix.scaled(220, 220, Qt.AspectRatioMode.KeepAspectRatio,
+                                          Qt.TransformationMode.SmoothTransformation))
+        lbl_logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        v.addWidget(lbl_logo)
         title = title_label("CD Factu")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         v.addWidget(title)
@@ -93,7 +103,7 @@ class MainMenu(QWidget):
         grid.setSpacing(16)
         for i, (icono, titulo, desc, key) in enumerate(MENU_ITEMS):
             card = MenuCard(icono, titulo, desc, lambda k=key: navigate(k))
-            grid.addWidget(card, i // 2, i % 2)
+            grid.addWidget(card, i // 3, i % 3)
         v.addLayout(grid)
         v.addStretch()
 
@@ -117,7 +127,7 @@ class MainWindow(QMainWindow):
         header = QHBoxLayout()
         try:
             lbl_logo = QLabel()
-            pix = QPixmap(str(resource_path("assets/factufacil_logo.png"))).scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            pix = QPixmap(str(resource_path("assets/factufacil_logo.png"))).scaled(56, 56, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             lbl_logo.setPixmap(pix)
             header.addWidget(lbl_logo)
         except Exception:
@@ -164,6 +174,10 @@ class MainWindow(QMainWindow):
         self.tab_emitir = TabEmitir(self)
         self.tab_cobros = TabCobros(self)
         self.tab_facturas = TabFacturas(self)
+        self.tab_servicios = TabServicios(self)
+        self.tab_gastos = TabGastos(self)
+        self.tab_balance = TabBalance(self)
+        self.tab_balance_anual = TabBalanceAnual(self)
 
         self.pages = {
             "tab_empresa": self.tab_empresa,
@@ -172,8 +186,12 @@ class MainWindow(QMainWindow):
             "tab_emitir": self.tab_emitir,
             "tab_cobros": self.tab_cobros,
             "tab_facturas": self.tab_facturas,
+            "tab_servicios": self.tab_servicios,
+            "tab_gastos": self.tab_gastos,
+            "tab_balance": self.tab_balance,
+            "tab_balance_anual": self.tab_balance_anual,
         }
-        for key in ["tab_empresa","tab_clientes","tab_productos","tab_emitir","tab_cobros","tab_facturas"]:
+        for key in self.pages:
             self.stack.addWidget(self.pages[key])
 
         layout.addWidget(self.stack, 1)
@@ -182,7 +200,7 @@ class MainWindow(QMainWindow):
         self.footer = QHBoxLayout()
         self.lbl_prog = QLabel("Programa: CD Factu")
         self.lbl_emp = QLabel("Empresa: -")
-        self.lbl_ver = QLabel(f"Versión: {VERSION}")
+        self.lbl_ver = QLabel(f"Versión: {APP_VERSION}")
         for l in (self.lbl_prog, self.lbl_emp, self.lbl_ver):
             l.setStyleSheet("color:#aaaaaa; font-size:12px;")
             self.footer.addWidget(l)
@@ -190,29 +208,39 @@ class MainWindow(QMainWindow):
         layout.addLayout(self.footer)
 
         self.actualizar_footer()
-        self.actualizar_boton_ejemplos()
         self.stack.setCurrentIndex(0)
         self.verificar_actualizacion()
-        # Primera ejecución: preguntar si se desean datos de ejemplo
+
+    def primera_ejecucion(self):
+        """Pregunta por datos de ejemplo (se llama con la ventana ya visible y sin el logo de carga)."""
         try:
             conn = get_connection()
             empty = (conn.execute("SELECT COUNT(*) AS c FROM clientes").fetchone()["c"] == 0 and
                      conn.execute("SELECT COUNT(*) AS c FROM facturas").fetchone()["c"] == 0)
             conn.close()
             if empty:
-                from PySide6.QtWidgets import QMessageBox
                 r = QMessageBox.question(self, "CD Factu",
                                          "¿Desea cargar datos de ejemplo para probar el programa?",
                                          QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
                 if r == QMessageBox.StandardButton.Yes:
                     self.cargar_ejemplos()
-                self.actualizar_boton_ejemplos()
         except Exception:
             pass
 
     def ir_a(self, key):
         idx = list(self.pages.keys()).index(key) + 1
         self.stack.setCurrentIndex(idx)
+        try:
+            if key == "tab_balance":
+                self.tab_balance.refrescar()
+            elif key == "tab_balance_anual":
+                self.tab_balance_anual.refrescar()
+            elif key == "tab_gastos":
+                self.tab_gastos.cargar_ivas()
+            elif key == "tab_servicios":
+                self.tab_servicios.cargar_ivas()
+        except Exception:
+            pass
         try:
             self.statusBar().showMessage(ayuda(key.replace("tab_","")), 8000)
         except Exception:
@@ -307,23 +335,13 @@ class MainWindow(QMainWindow):
             except Exception: pass
             try: self.tab_empresa.cargar()
             except Exception: pass
+            try: self.tab_balance.refrescar()
+            except Exception: pass
+            try: self.tab_balance_anual.refrescar()
+            except Exception: pass
             info(self, msg)
-            self.actualizar_boton_ejemplos()
         except Exception as e:
             error(self, f"No se pudieron cargar los datos de ejemplo: {e}")
-
-    def actualizar_boton_ejemplos(self):
-        try:
-            conn = get_connection()
-            n_cli = conn.execute("SELECT COUNT(*) AS c FROM clientes").fetchone()["c"]
-            n_fac = conn.execute("SELECT COUNT(*) AS c FROM facturas").fetchone()["c"]
-            conn.close()
-            if n_cli > 0 or n_fac > 0:
-                self.btn_sample.hide()
-            else:
-                self.btn_sample.show()
-        except Exception:
-            pass
 
     def hacer_backup(self):
         from ..ui.widgets import info, error
@@ -337,17 +355,14 @@ class MainWindow(QMainWindow):
         from ..ui.widgets import confirm, info, error
         from PySide6.QtWidgets import QFileDialog
         backups = listar_backups()
-        if backups:
-            carpeta = str(BACKUP_DIR)
-        else:
-            carpeta = str(Path.home())
+        carpeta = str(BACKUP_DIR if backups else Path.home())
         path, _ = QFileDialog.getOpenFileName(self, "Seleccionar copia de seguridad", carpeta,
-                                            "Base de datos (*.db);;Todos los archivos (*)")
+                                              "Base de datos (*.db);;Todos los archivos (*)")
         if not path:
             return
         if not confirm(self, "¿Restaurar la copia de seguridad seleccionada?\n"
-                            "Se creará una copia de la BD actual antes de restaurar.\n"
-                            "Será necesario reiniciar el programa."):
+                             "Se creará una copia de la BD actual antes de restaurar.\n"
+                             "Será necesario reiniciar el programa."):
             return
         if restaurar_backup(Path(path)):
             info(self, "Copia restaurada correctamente. Reinicie el programa para aplicar los cambios.")
@@ -374,7 +389,7 @@ class MainWindow(QMainWindow):
         title.setStyleSheet("font-size:24px; font-weight:bold; color:#4caf50;")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         v.addWidget(title)
-        ver = QLabel("Versión 0.0.1 (inicial)")
+        ver = QLabel(f"Versión {APP_VERSION}")
         ver.setAlignment(Qt.AlignmentFlag.AlignCenter)
         ver.setStyleSheet("color:#aaaaaa; font-size:12px;")
         v.addWidget(ver)

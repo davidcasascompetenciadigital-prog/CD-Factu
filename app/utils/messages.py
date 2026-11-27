@@ -20,5 +20,10 @@ def ayuda(tab: str) -> str:
         "emitir": "Elige un cliente, añade líneas y pulsa EMITIR FACTURA. No se puede editar después.",
         "cobros": "Aquí registras los pagos que recibes de tus facturas.",
         "facturas": "Aquí ves todas las facturas emitidas y su estado de pago.",
+        "servicios": "Aquí guardas tus servicios con un título y una descripción larga. Al facturar podrás añadirlos con un clic.",
+        "gastos": "Aquí apuntas las facturas que recibes de tus proveedores. Sirven para calcular el IVA soportado.",
+        "balance": "Resumen del trimestre: ingresos, gastos, cobros y el IVA a ingresar o compensar (modelo 303).",
+        "balance_anual": "Resumen del año: IVA anual (modelo 390) y previsión orientativa de IRPF según lo facturado, "
+                         "los gastos y las retenciones. Puedes cambiar el tipo efectivo de IRPF.",
     }
     return textos.get(tab, "Pulsa ? en cualquier pantalla para ver ayuda.")

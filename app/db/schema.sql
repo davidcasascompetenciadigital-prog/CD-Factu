@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS facturas (
     base_imponible      REAL NOT NULL,
     total_iva           REAL NOT NULL,
     total_factura       REAL NOT NULL,
+    retencion_irpf      REAL NOT NULL DEFAULT 0,  -- retención IRPF practicada por el cliente
     estado              TEXT NOT NULL DEFAULT 'emitida', -- emitida / anulada / rectificativa
     estado_cobro        TEXT NOT NULL DEFAULT 'no_cobrada', -- no_cobrada / parcial / pagada
     pendiente           REAL NOT NULL,
@@ -193,3 +194,100 @@ BEFORE DELETE ON facturas
 BEGIN
     SELECT RAISE(ABORT, 'Las facturas no se pueden borrar');
 END;
+
+-- ============================================================
+-- SERVICIOS (titulo + descripcion larga, p. ej. "Informe pericial")
+-- ============================================================
+CREATE TABLE IF NOT EXISTS servicios (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    titulo              TEXT NOT NULL,
+    descripcion         TEXT,
+    importe_base        REAL NOT NULL DEFAULT 0,
+    tipo_iva_id         INTEGER REFERENCES tipos_iva(id),
+    activo              INTEGER NOT NULL DEFAULT 1,
+    creado_en           TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+
+-- ============================================================
+-- GASTOS (facturas recibidas, para el IVA soportado y el balance)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS gastos (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha               TEXT NOT NULL,          -- YYYY-MM-DD
+    proveedor           TEXT NOT NULL,
+    nif_proveedor       TEXT,
+    numero_factura      TEXT,
+    concepto            TEXT,
+    base                REAL NOT NULL,
+    porcentaje_iva      REAL NOT NULL DEFAULT 21,
+    cuota_iva           REAL NOT NULL,
+    total               REAL NOT NULL,
+    retencion_irpf      REAL NOT NULL DEFAULT 0,  -- retención IRPF practicada al proveedor
+    iva_deducible       INTEGER NOT NULL DEFAULT 1,
+    pagado              INTEGER NOT NULL DEFAULT 1,
+    creado_en           TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_gastos_fecha ON gastos(fecha);
+
+-- ============================================================
+-- AJUSTES (clave/valor): p. ej. numero de instalacion del SIF
+-- ============================================================
+CREATE TABLE IF NOT EXISTS ajustes (
+    clave   TEXT PRIMARY KEY,
+    valor   TEXT
+);
+
+-- ============================================================
+-- VERI*FACTU (registros oficiales segun Orden HAC/1177/2024)
+-- Cadena de huellas independiente por entorno ('pruebas' / 'real').
+-- El contenido del registro es inmutable; solo cambia el estado de envio.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS verifactu_registros (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    factura_id          INTEGER NOT NULL REFERENCES facturas(id),
+    entorno             TEXT NOT NULL,            -- pruebas / real
+    tipo                TEXT NOT NULL,            -- alta / anulacion
+    id_emisor           TEXT NOT NULL,
+    num_serie           TEXT NOT NULL,
+    fecha_expedicion    TEXT NOT NULL,            -- dd-mm-yyyy
+    fecha_hora_huso     TEXT NOT NULL,            -- ISO 8601 con huso
+    huella              TEXT NOT NULL,
+    huella_anterior     TEXT,
+    xml_registro        TEXT NOT NULL,
+    qr_url              TEXT,
+    estado              TEXT NOT NULL DEFAULT 'pendiente', -- pendiente / correcto / aceptado_con_errores / incorrecto
+    csv                 TEXT,
+    codigo_error        TEXT,
+    descripcion_error   TEXT,
+    enviado_en          TEXT,
+    creado_en           TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_vf_reg_factura ON verifactu_registros(factura_id);
+CREATE INDEX IF NOT EXISTS idx_vf_reg_entorno ON verifactu_registros(entorno, id);
+
+CREATE TRIGGER IF NOT EXISTS trg_vf_reg_inmutable
+BEFORE UPDATE OF factura_id, entorno, tipo, id_emisor, num_serie, fecha_expedicion,
+                 fecha_hora_huso, huella, huella_anterior, xml_registro ON verifactu_registros
+BEGIN
+    SELECT RAISE(ABORT, 'Los registros Verifactu no se pueden modificar');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_vf_reg_no_delete
+BEFORE DELETE ON verifactu_registros
+BEGIN
+    SELECT RAISE(ABORT, 'Los registros Verifactu no se pueden borrar');
+END;
+
+-- Bitacora de envios a la AEAT (se conserva XML enviado y respuesta)
+CREATE TABLE IF NOT EXISTS verifactu_envios (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    entorno             TEXT NOT NULL,
+    enviado_en          TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    n_registros         INTEGER NOT NULL,
+    estado_envio        TEXT,                     -- Correcto / ParcialmenteCorrecto / Incorrecto / error
+    csv                 TEXT,
+    tiempo_espera       INTEGER,
+    mensaje             TEXT,
+    xml_enviado         TEXT,
+    xml_respuesta       TEXT
+);

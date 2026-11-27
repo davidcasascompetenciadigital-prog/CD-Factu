@@ -2,3 +2,5 @@ PySide6>=6.6
 reportlab>=4.0
 qrcode>=7.4
 Pillow>=10.0
+requests>=2.31
+cryptography>=42.0
