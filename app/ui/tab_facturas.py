@@ -129,6 +129,7 @@ class TabFacturas(QWidget):
         cliente = conn.execute("SELECT * FROM clientes WHERE id=?", (fr["cliente_id"],)).fetchone()
         lineas = conn.execute("SELECT * FROM lineas_factura WHERE factura_id=? ORDER BY orden", (fid,)).fetchall()
         desglose = conn.execute("SELECT * FROM desglose_iva_factura WHERE factura_id=?", (fid,)).fetchall()
+        cobros = conn.execute("SELECT fecha_cobro, importe, forma_pago FROM cobros WHERE factura_id=? ORDER BY id", (fid,)).fetchall()
         reg = conn.execute("SELECT qr_payload FROM registros_facturacion WHERE factura_id=? LIMIT 1", (fid,)).fetchone()
         emp = conn.execute("SELECT * FROM empresa WHERE id=1").fetchone()
         conn.close()
@@ -145,6 +146,9 @@ class TabFacturas(QWidget):
             nl.base_linea = l["base_linea"]; nl.iva_linea = l["iva_linea"]; nl.total_linea = l["total_linea"]
             f.lineas.append(nl)
         f.desglose_iva = {d["porcentaje"]: (d["base"], d["cuota"]) for d in desglose}
+        f.estado_cobro = fr["estado_cobro"]
+        f.pendiente = fr["pendiente"]
+        f.cobros = [{"fecha": c["fecha_cobro"], "importe": c["importe"], "forma_pago": c["forma_pago"]} for c in cobros]
 
         class C: pass
         c = C()

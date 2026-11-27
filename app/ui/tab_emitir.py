@@ -417,27 +417,45 @@ class TabEmitir(QWidget):
         e.registro_mercantil = er["registro_mercantil"] if "registro_mercantil" in er.keys() else None
         f.numero = numero
         f.fecha_emision = date.today().isoformat()
-        generar_pdf_factura(f, e, c, f.lineas, f.desglose_iva, str(qr_path), str(pdf_path))
-        conn.execute("UPDATE facturas SET pdf_path=? WHERE id=?", (str(pdf_path), factura_id))
+
         # estado cobro inicial
-        estado = self.cmb_cobro.currentText()
-        if estado == "Cobrada totalmente":
+        estado_cobro = "no_cobrada"
+        pendiente = f.total_factura
+        cobros_list = []
+        estado_txt = self.cmb_cobro.currentText()
+        if estado_txt == "Cobrada totalmente":
             imp = f.total_factura
+            fecha_cobro = date.today().isoformat()
             conn.execute("""INSERT INTO cobros (factura_id, fecha_cobro, importe, forma_pago) VALUES (?,?,?,?)""",
-                         (factura_id, date.today().isoformat(), imp, self.cmb_forma.currentText()))
+                         (factura_id, fecha_cobro, imp, self.cmb_forma.currentText()))
+            estado_cobro = "pagada"
+            pendiente = 0.0
+            cobros_list.append({"fecha": fecha_cobro, "importe": imp, "forma_pago": self.cmb_forma.currentText()})
             conn.execute("UPDATE facturas SET estado_cobro='pagada', pendiente=0 WHERE id=?", (factura_id,))
-        elif estado == "Cobrada parcialmente":
+        elif estado_txt == "Cobrada parcialmente":
             try:
                 imp = float(self.inp_importe_cobro.text().replace(",", "."))
             except ValueError:
                 imp = f.total_factura
+            fecha_cobro = self.inp_fecha_cobro.text() or date.today().isoformat()
             conn.execute("""INSERT INTO cobros (factura_id, fecha_cobro, importe, forma_pago) VALUES (?,?,?,?)""",
-                         (factura_id, self.inp_fecha_cobro.text() or date.today().isoformat(),
-                          imp, self.cmb_forma.currentText()))
+                         (factura_id, fecha_cobro, imp, self.cmb_forma.currentText()))
             pend = round(f.total_factura - imp, 2)
             nuevo_estado = "pagada" if pend <= 0 else "parcial"
+            estado_cobro = nuevo_estado
+            pendiente = max(pend, 0)
+            cobros_list.append({"fecha": fecha_cobro, "importe": imp, "forma_pago": self.cmb_forma.currentText()})
             conn.execute("UPDATE facturas SET estado_cobro=?, pendiente=? WHERE id=?",
                          (nuevo_estado, max(pend, 0), factura_id))
+        conn.commit()
+
+        # datos de cobro para el PDF
+        f.estado_cobro = estado_cobro
+        f.pendiente = pendiente
+        f.cobros = cobros_list
+
+        generar_pdf_factura(f, e, c, f.lineas, f.desglose_iva, str(qr_path), str(pdf_path))
+        conn.execute("UPDATE facturas SET pdf_path=? WHERE id=?", (str(pdf_path), factura_id))
         conn.commit()
         conn.close()
 

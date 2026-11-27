@@ -62,6 +62,32 @@ def _bloque_factura(story, factura, empresa, cliente, lineas, desglose, qr_path,
     story.append(Paragraph(f"<b>Base imponible total: {factura.base_imponible:.2f} €</b>", normal))
     story.append(Paragraph(f"<b>Total factura: {factura.total_factura:.2f} €</b>", title))
 
+    # Cobros
+    story.append(Spacer(1, 6*mm))
+    story.append(Paragraph("<b>Cobros:</b>", normal))
+    estado = getattr(factura, "estado_cobro", "no_cobrada") or "no_cobrada"
+    etiqueta_estado = {"pagada": "Pagada", "parcial": "Parcial", "no_cobrada": "Pendiente"}.get(estado, estado)
+    pendiente = getattr(factura, "pendiente", 0.0) or 0.0
+    story.append(Paragraph(f"Estado de cobro: {etiqueta_estado}", normal))
+    story.append(Paragraph(f"Pendiente de cobro: {pendiente:.2f} €", normal))
+    cobros = getattr(factura, "cobros", None) or []
+    if cobros:
+        data_c = [["Fecha", "Importe", "Forma de pago"]]
+        for c in cobros:
+            data_c.append([str(c.get("fecha", c.get("fecha_cobro", ""))),
+                          f"{float(c.get('importe', 0)):.2f} €",
+                          str(c.get("forma_pago", c.get("forma", "")))])
+        tc = Table(data_c, colWidths=[40*mm, 30*mm, 60*mm])
+        tc.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (-1,0), colors.lightgrey),
+            ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+            ("GRID", (0,0), (-1,-1), 0.5, colors.grey),
+            ("FONTSIZE", (0,0), (-1,-1), 9),
+        ]))
+        story.append(tc)
+    else:
+        story.append(Paragraph("Sin cobros registrados.", normal))
+
     # Registro Mercantil
     reg = getattr(empresa, "registro_mercantil", None)
     if reg:
