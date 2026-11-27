@@ -54,16 +54,21 @@ class VisorFacturaDialog(QDialog):
 
         # Líneas
         v.addWidget(QLabel("<b>Líneas:</b>"))
-        tabla = QTableWidget(0, 4)
-        tabla.setHorizontalHeaderLabels(["Concepto", "Base", "IVA %", "Total"])
+        tabla = QTableWidget(0, 6)
+        tabla.setHorizontalHeaderLabels(["Concepto", "Cant.", "Precio", "Dto.%", "IVA %", "Total"])
         tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        total_desc = 0.0
         for i, l in enumerate(data["lineas"]):
             tabla.insertRow(i)
             tabla.setItem(i, 0, QTableWidgetItem(l.concepto))
-            it = QTableWidgetItem(f"{l.base_linea:.2f} €"); it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter); tabla.setItem(i, 1, it)
-            it = QTableWidgetItem(f"{l.porcentaje_iva:.0f}%"); it.setTextAlignment(Qt.AlignmentFlag.AlignCenter); tabla.setItem(i, 2, it)
-            it = QTableWidgetItem(f"{l.total_linea:.2f} €"); it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter); tabla.setItem(i, 3, it)
+            it = QTableWidgetItem(f"{l.cantidad:g}"); it.setTextAlignment(Qt.AlignmentFlag.AlignCenter); tabla.setItem(i, 1, it)
+            it = QTableWidgetItem(f"{l.importe_base:.2f} €"); it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter); tabla.setItem(i, 2, it)
+            desc = getattr(l, "descuento", 0.0) or 0.0
+            total_desc += l.cantidad * l.importe_base * desc / 100.0
+            it = QTableWidgetItem(f"{desc:g}%"); it.setTextAlignment(Qt.AlignmentFlag.AlignCenter); tabla.setItem(i, 3, it)
+            it = QTableWidgetItem(f"{l.porcentaje_iva:.0f}%"); it.setTextAlignment(Qt.AlignmentFlag.AlignCenter); tabla.setItem(i, 4, it)
+            it = QTableWidgetItem(f"{l.total_linea:.2f} €"); it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter); tabla.setItem(i, 5, it)
         tabla.setMinimumHeight(120)
         v.addWidget(tabla)
 
@@ -73,6 +78,7 @@ class VisorFacturaDialog(QDialog):
             v.addWidget(QLabel(f"IVA {pct:.0f}%: base {base:.2f} € + cuota {cuota:.2f} €"))
 
         v.addWidget(QLabel(f"<b>Base imponible total: {f.base_imponible:.2f} €</b>"))
+        v.addWidget(QLabel(f"<b>Total descuento: {total_desc:.2f} €</b>"))
         v.addWidget(QLabel(f"<b>Total factura: {f.total_factura:.2f} €</b>"))
 
         # Cobros

@@ -39,11 +39,14 @@ def _bloque_factura(story, factura, empresa, cliente, lineas, desglose, qr_path,
     story.append(Spacer(1, 6*mm))
 
     # Tabla de líneas
-    data = [["Concepto", "Base", "IVA %", "Total"]]
+    data = [["Concepto", "Cant.", "Precio", "Dto.%", "IVA %", "Total"]]
+    total_descuento = 0.0
     for l in lineas:
-        data.append([l.concepto, f"{l.base_linea:.2f} €", f"{l.porcentaje_iva:.0f}%",
-                    f"{l.total_linea:.2f} €"])
-    t = Table(data, colWidths=[90*mm, 30*mm, 20*mm, 30*mm])
+        desc = getattr(l, "descuento", 0.0) or 0.0
+        total_descuento += l.cantidad * l.importe_base * desc / 100.0
+        data.append([l.concepto, f"{l.cantidad:g}", f"{l.importe_base:.2f} €",
+                    f"{desc:g}%", f"{l.porcentaje_iva:.0f}%", f"{l.total_linea:.2f} €"])
+    t = Table(data, colWidths=[60*mm, 15*mm, 22*mm, 18*mm, 18*mm, 25*mm])
     t.setStyle(TableStyle([
         ("BACKGROUND", (0,0), (-1,0), colors.lightgrey),
         ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
@@ -60,6 +63,7 @@ def _bloque_factura(story, factura, empresa, cliente, lineas, desglose, qr_path,
         story.append(Paragraph(f"IVA {pct:.0f}%: base {base:.2f} € + cuota {cuota:.2f} €", normal))
     story.append(Spacer(1, 4*mm))
     story.append(Paragraph(f"<b>Base imponible total: {factura.base_imponible:.2f} €</b>", normal))
+    story.append(Paragraph(f"<b>Total descuento: {total_descuento:.2f} €</b>", normal))
     story.append(Paragraph(f"<b>Total factura: {factura.total_factura:.2f} €</b>", title))
 
     # Cobros
