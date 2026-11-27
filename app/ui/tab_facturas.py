@@ -1,7 +1,7 @@
 # app/ui/tab_facturas.py
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                                QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox,
-                               QAbstractItemView, QFileDialog)
+                               QAbstractItemView, QFileDialog, QDialog, QScrollArea, QFrame)
 from PySide6.QtCore import Qt
 import os
 import os
@@ -16,6 +16,102 @@ from ..utils.messages import ayuda
 from ..services.verifactu_export import exportar_csv
 from ..config import FACTURAS_DIR
 
+class VisorFacturaDialog(QDialog):
+    def __init__(self, parent, data):
+        super().__init__(parent)
+        self.data = data
+        self.setWindowTitle(f"Factura {data['factura'].numero}")
+        self.setMinimumSize(700, 600)
+        v = QVBoxLayout(self)
+        f = data["factura"]; e = data["empresa"]; c = data["cliente"]
+
+        v.addWidget(QLabel(f"<b>FACTURA Nº {f.numero}</b>"))
+        v.addWidget(QLabel(f"Fecha: {f.fecha_emision}"))
+
+        # Dos columnas: emisor (izq) y cliente (der)
+        cols = QHBoxLayout()
+        # Emisor
+        left = QVBoxLayout()
+        left.addWidget(QLabel("<b>Emisor:</b>"))
+        left.addWidget(QLabel(f"<b>{e.nombre}</b>"))
+        left.addWidget(QLabel(f"NIF: {e.nif}"))
+        left.addWidget(QLabel(f"{e.direccion}, {e.cp} {e.ciudad}"))
+        left.addWidget(QLabel(f"{e.comunidad_autonoma}, {e.pais}"))
+        if getattr(e, "registro_mercantil", None):
+            left.addWidget(QLabel(f"Reg. Mercantil: {e.registro_mercantil}"))
+        left.addStretch()
+        # Cliente
+        right = QVBoxLayout()
+        right.addWidget(QLabel("<b>Cliente:</b>"))
+        right.addWidget(QLabel(c.nombre_mostrar()))
+        dni = c.dni_cif if hasattr(c, "dni_cif") else ""
+        right.addWidget(QLabel(f"NIF/CIF: {dni}"))
+        right.addWidget(QLabel(f"{c.direccion}, {c.cp} {c.ciudad}"))
+        right.addStretch()
+        cols.addLayout(left, 1)
+        cols.addLayout(right, 1)
+        v.addLayout(cols)
+
+        # Líneas
+        v.addWidget(QLabel("<b>Líneas:</b>"))
+        tabla = QTableWidget(0, 4)
+        tabla.setHorizontalHeaderLabels(["Concepto", "Base", "IVA %", "Total"])
+        tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        for i, l in enumerate(data["lineas"]):
+            tabla.insertRow(i)
+            tabla.setItem(i, 0, QTableWidgetItem(l.concepto))
+            it = QTableWidgetItem(f"{l.base_linea:.2f} €"); it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter); tabla.setItem(i, 1, it)
+            it = QTableWidgetItem(f"{l.porcentaje_iva:.0f}%"); it.setTextAlignment(Qt.AlignmentFlag.AlignCenter); tabla.setItem(i, 2, it)
+            it = QTableWidgetItem(f"{l.total_linea:.2f} €"); it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter); tabla.setItem(i, 3, it)
+        tabla.setMinimumHeight(120)
+        v.addWidget(tabla)
+
+        # Desglose
+        v.addWidget(QLabel("<b>Desglose de IVA:</b>"))
+        for pct, (base, cuota) in data["desglose"].items():
+            v.addWidget(QLabel(f"IVA {pct:.0f}%: base {base:.2f} € + cuota {cuota:.2f} €"))
+
+        v.addWidget(QLabel(f"<b>Base imponible total: {f.base_imponible:.2f} €</b>"))
+        v.addWidget(QLabel(f"<b>Total factura: {f.total_factura:.2f} €</b>"))
+
+        # Cobros
+        v.addWidget(QLabel("<b>Cobros:</b>"))
+        estado = getattr(f, "estado_cobro", "no_cobrada") or "no_cobrada"
+        etiqueta = {"pagada": "Pagada", "parcial": "Parcial", "no_cobrada": "Pendiente"}.get(estado, estado)
+        v.addWidget(QLabel(f"Estado de cobro: {etiqueta}"))
+        v.addWidget(QLabel(f"Pendiente: {getattr(f, 'pendiente', 0.0):.2f} €"))
+        cobros = getattr(f, "cobros", None) or []
+        if cobros:
+            for c in cobros:
+                v.addWidget(QLabel(f"  - {c.get('fecha','')}: {float(c.get('importe',0)):.2f} € ({c.get('forma_pago','')})"))
+        else:
+            v.addWidget(QLabel("Sin cobros registrados."))
+
+        # Botones
+        row = QHBoxLayout()
+        btn_imp = big_button("Imprimir", "primary")
+        btn_imp.clicked.connect(self.imprimir)
+        row.addWidget(btn_imp)
+        btn_cerrar = big_button("Cerrar", "secondary")
+        btn_cerrar.clicked.connect(self.accept)
+        row.addWidget(btn_cerrar)
+        row.addStretch()
+        v.addLayout(row)
+
+    def imprimir(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Guardar PDF", f"{self.data['factura'].numero}.pdf", "PDF (*.pdf)")
+        if not path:
+            return
+        generar_pdf_factura(self.data["factura"], self.data["empresa"], self.data["cliente"],
+                          self.data["lineas"], self.data["desglose"], self.data["qr_path"], path,
+                          leyenda_qr=self.data.get("leyenda_qr"))
+        info(self, "PDF generado. Todo correcto.")
+        try:
+            os.startfile(path)
+        except Exception:
+            pass
+
 class TabFacturas(QWidget):
     def __init__(self, parent):
         super().__init__(parent)
@@ -24,24 +120,31 @@ class TabFacturas(QWidget):
         v.setSpacing(10)
         v.addWidget(title_label("Facturas emitidas"))
 
-        self.tabla = QTableWidget(0, 8)
-        self.tabla.setHorizontalHeaderLabels(["Sel", "Fecha", "Nombre", "DNI/CIF", "Base", "IVA", "Total", "Estado"])
-        self.tabla.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.tabla = QTableWidget(0, 9)
+        self.tabla.setHorizontalHeaderLabels(["Sel", "Núm.FRA.", "Fecha", "Nombre", "DNI/CIF", "Base", "IVA", "Total", "Estado"])
+        # Fecha: tamaño justo; Nombre: mayor; resto ajusta a su dato
+        header = self.tabla.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(8, QHeaderView.ResizeMode.ResizeToContents)
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.tabla.setMinimumHeight(320)
-        self.tabla.itemDoubleClicked.connect(self.imprimir_factura_doble)
-        self.tabla.setColumnWidth(0, 40)
-        self.tabla.setColumnWidth(1, 90)
-        self.tabla.setColumnWidth(2, 180)
-        self.tabla.setColumnWidth(3, 110)
-        self.tabla.setColumnWidth(4, 90)
-        self.tabla.setColumnWidth(5, 90)
-        self.tabla.setColumnWidth(6, 90)
-        self.tabla.setColumnWidth(7, 90)
+        self.tabla.itemDoubleClicked.connect(self.ver_factura)
+        self.tabla.setColumnWidth(0, 30)
+        self.tabla.setColumnWidth(2, 90)
         v.addWidget(self.tabla)
 
         row = QHBoxLayout()
+        btn_ver = big_button("Ver factura", "primary")
+        btn_ver.clicked.connect(self.ver_factura)
+        row.addWidget(btn_ver)
         btn_imp = big_button("Imprimir PDF", "primary")
         btn_imp.clicked.connect(self.imprimir_seleccionadas)
         row.addWidget(btn_imp)
@@ -83,6 +186,10 @@ class TabFacturas(QWidget):
             chk.setCheckState(Qt.CheckState.Unchecked)
             chk.setData(Qt.ItemDataRole.UserRole, (r["id"], r["pdf_path"]))
             self.tabla.setItem(i, 0, chk)
+            # Núm.FRA.
+            it_num = QTableWidgetItem(r["numero"] or "")
+            it_num.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.tabla.setItem(i, 1, it_num)
             # Fecha formato es_ES
             try:
                 from datetime import datetime
@@ -91,19 +198,19 @@ class TabFacturas(QWidget):
                 fecha_es = r["fecha_emision"]
             it_fecha = QTableWidgetItem(fecha_es)
             it_fecha.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.tabla.setItem(i, 1, it_fecha)
+            self.tabla.setItem(i, 2, it_fecha)
             nombre = r["empresa"] if r["empresa"] else f"{r['nombre']} {r['apellidos'] or ''}".strip()
-            self.tabla.setItem(i, 2, QTableWidgetItem(nombre))
-            self.tabla.setItem(i, 3, QTableWidgetItem(r["dni_cif"] or ""))
+            self.tabla.setItem(i, 3, QTableWidgetItem(nombre))
+            self.tabla.setItem(i, 4, QTableWidgetItem(r["dni_cif"] or ""))
             it_base = QTableWidgetItem(f"{r['base_imponible']:.2f} €")
             it_base.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.tabla.setItem(i, 4, it_base)
+            self.tabla.setItem(i, 5, it_base)
             it_iva = QTableWidgetItem(f"{r['total_iva']:.2f} €")
             it_iva.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.tabla.setItem(i, 5, it_iva)
+            self.tabla.setItem(i, 6, it_iva)
             it_total = QTableWidgetItem(f"{r['total_factura']:.2f} €")
             it_total.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.tabla.setItem(i, 6, it_total)
+            self.tabla.setItem(i, 7, it_total)
             estado = r["estado_cobro"]
             if r["estado"] == "anulada":
                 estado = "Anulada"
@@ -113,7 +220,7 @@ class TabFacturas(QWidget):
                 estado = "Parcial"
             else:
                 estado = "Pendiente"
-            self.tabla.setItem(i, 7, QTableWidgetItem(estado))
+            self.tabla.setItem(i, 8, QTableWidgetItem(estado))
 
     def _fila_seleccionada(self):
         row = self.tabla.currentRow()
@@ -202,6 +309,25 @@ class TabFacturas(QWidget):
             os.startfile(path)
         except Exception:
             pass
+
+    def ver_factura(self, item=None):
+        data = None
+        if item is not None:
+            d = item.data(Qt.ItemDataRole.UserRole) if hasattr(item, "data") else None
+            if d:
+                fid, _ = d
+                data = self._cargar_datos_factura(fid)
+        if data is None:
+            sel = self._fila_seleccionada()
+            if not sel:
+                return
+            fid, _ = sel
+            data = self._cargar_datos_factura(fid)
+        if not data:
+            error(self, "No se encontró la factura.")
+            return
+        dlg = VisorFacturaDialog(self, data)
+        dlg.exec()
 
     def imprimir_seleccionadas(self):
         lista = []

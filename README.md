@@ -41,8 +41,22 @@ David Casas M.
 - GitHub: davidcasascompetenciadigital-prog
 
 ## Versión
-0.0.1 (inicial)
+0.0.5 (integración de las versiones 0.0.3/0.0.4 del autor con las novedades 0.0.2)
 
+
+---
+
+## Novedades de la versión 0.0.5
+
+- **Del autor (v0.0.3):** *Facturas emitidas* añade columna **Núm.FRA.**, botón **Ver factura** con visor y botón
+  **Imprimir**; ajuste de columnas y doble clic para ver la factura.
+- **Del autor (v0.0.4):** *Productos* pasa a dos columnas con búsqueda por nombre o referencia; *Emitir factura*
+  incorpora búsqueda inline de clientes (nombre, CIF, email y teléfono); el visor de factura muestra emisor y cliente
+  en dos columnas.
+- **De esta rama (0.0.2):** servicios con descripción por factura, gastos y balance trimestral con hoja del modelo 303,
+  y Verifactu con QR oficial, envío SOAP y vista previa. Todo ello convive con las mejoras anteriores.
+
+> El visor del autor imprime ahora el PDF respetando la leyenda del QR oficial de Verifactu cuando la factura está registrada.
 
 ---
 

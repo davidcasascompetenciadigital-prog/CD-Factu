@@ -190,15 +190,26 @@ class TabEmitir(QWidget):
         v.setSpacing(10)
         v.addWidget(title_label("Emitir factura"))
 
-        # 1. Cliente
+        # 1. Cliente (búsqueda inline del autor + botón de compatibilidad)
         v.addWidget(QLabel("1. Cliente:"))
-        row = QHBoxLayout()
         self.lbl_cliente = QLabel("Ningún cliente seleccionado")
         self.lbl_cliente.setStyleSheet("font-size:16px; padding:8px; background:#2a2a2a; border:1px solid #3a3a3a; border-radius:6px;")
-        row.addWidget(self.lbl_cliente, 1)
+        v.addWidget(self.lbl_cliente)
+        self.inp_buscar_cliente = QLineEdit()
+        self.inp_buscar_cliente.setPlaceholderText("Buscar cliente (nombre, CIF, email, teléfono)...")
+        self.inp_buscar_cliente.textChanged.connect(self.filtrar_clientes)
+        v.addWidget(self.inp_buscar_cliente)
+        self.lista_clientes = QListWidget()
+        self.lista_clientes.setMaximumHeight(150)
+        self.lista_clientes.itemClicked.connect(self.seleccionar_cliente_lista)
+        v.addWidget(self.lista_clientes)
+        self._clientes = []
+        self.cargar_clientes()
+        row = QHBoxLayout()
         btn_sel = big_button("Elegir cliente", "primary")
         btn_sel.clicked.connect(self.elegir_cliente)
         row.addWidget(btn_sel)
+        row.addStretch()
         v.addLayout(row)
 
         # 2. Líneas
@@ -317,18 +328,70 @@ class TabEmitir(QWidget):
                              "pruebas": "Sin efectos fiscales. Pide confirmación.",
                              "real": "Registro REAL en la AEAT. Pide doble confirmación."}.get(d, ""))
 
+    def cargar_clientes(self):
+        conn = get_connection()
+        rows = conn.execute("""SELECT id, nombre, apellidos, empresa, dni_cif, direccion, cp, ciudad
+                               FROM clientes""").fetchall()
+        contacts = conn.execute("SELECT cliente_id, telefono, email FROM contactos_cliente").fetchall()
+        conn.close()
+        contact_map = {}
+        for c in contacts:
+            contact_map.setdefault(c["cliente_id"], []).append((c["telefono"] or "", c["email"] or ""))
+        self._clientes = []
+        for r in rows:
+            ct = contact_map.get(r["id"], [])
+            telefonos = " ".join(t for t, e in ct)
+            emails = " ".join(e for t, e in ct)
+            self._clientes.append({
+                "id": r["id"],
+                "nombre": r["nombre"] or "",
+                "apellidos": r["apellidos"] or "",
+                "empresa": r["empresa"] or "",
+                "dni_cif": r["dni_cif"] or "",
+                "direccion": r["direccion"] or "",
+                "cp": r["cp"] or "",
+                "ciudad": r["ciudad"] or "",
+                "telefonos": telefonos,
+                "emails": emails,
+            })
+        self.filtrar_clientes(self.inp_buscar_cliente.text())
+
+    def _texto_cliente(self, c):
+        return " ".join([c["nombre"], c["apellidos"], c["empresa"], c["dni_cif"],
+                         c["direccion"], c["cp"], c["ciudad"], c["telefonos"], c["emails"]]).lower()
+
+    def filtrar_clientes(self, texto):
+        self.lista_clientes.clear()
+        t = (texto or "").strip().lower()
+        for c in self._clientes:
+            if t and t not in self._texto_cliente(c):
+                continue
+            nombre = (c["nombre"] + " " + c["apellidos"]).strip()
+            if c["empresa"]:
+                nombre += f"  |  Empresa: {c['empresa']}"
+            if c["dni_cif"]:
+                nombre += f"  |  CIF: {c['dni_cif']}"
+            item = QListWidgetItem(nombre)
+            item.setData(Qt.ItemDataRole.UserRole, c["id"])
+            self.lista_clientes.addItem(item)
+
+    def seleccionar_cliente_lista(self, item):
+        cid = item.data(Qt.ItemDataRole.UserRole)
+        if cid is None:
+            return
+        self.cliente_id = cid
+        for c in self._clientes:
+            if c["id"] == cid:
+                self.cliente_data = c
+                break
+        c = self.cliente_data
+        self.lbl_cliente.setText((c["nombre"] + " " + c["apellidos"]).strip() +
+                                (f"  |  Empresa: {c['empresa']}" if c["empresa"] else ""))
+
     def elegir_cliente(self):
-        dlg = SelectorClienteDialog(self)
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            cid = dlg.seleccionado_id()
-            if cid is None: return
-            self.cliente_id = cid
-            conn = get_connection()
-            r = conn.execute("SELECT * FROM clientes WHERE id=?", (cid,)).fetchone()
-            conn.close()
-            self.cliente_data = dict(r)
-            self.lbl_cliente.setText(f"{r['nombre']} {r['apellidos'] or ''}".strip() +
-                                    (f"  |  Empresa: {r['empresa']}" if r['empresa'] else ""))
+        # compatibilidad: abre el primer resultado filtrado
+        if self.lista_clientes.count() > 0:
+            self.seleccionar_cliente_lista(self.lista_clientes.item(0))
 
     def add_producto(self):
         dlg = SelectorProductoDialog(self)
