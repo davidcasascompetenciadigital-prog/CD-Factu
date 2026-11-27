@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS facturas (
     base_imponible      REAL NOT NULL,
     total_iva           REAL NOT NULL,
     total_factura       REAL NOT NULL,
+    retencion_irpf      REAL NOT NULL DEFAULT 0,  -- retención IRPF practicada por el cliente
     estado              TEXT NOT NULL DEFAULT 'emitida', -- emitida / anulada / rectificativa
     estado_cobro        TEXT NOT NULL DEFAULT 'no_cobrada', -- no_cobrada / parcial / pagada
     pendiente           REAL NOT NULL,
@@ -221,6 +222,7 @@ CREATE TABLE IF NOT EXISTS gastos (
     porcentaje_iva      REAL NOT NULL DEFAULT 21,
     cuota_iva           REAL NOT NULL,
     total               REAL NOT NULL,
+    retencion_irpf      REAL NOT NULL DEFAULT 0,  -- retención IRPF practicada al proveedor
     iva_deducible       INTEGER NOT NULL DEFAULT 1,
     pagado              INTEGER NOT NULL DEFAULT 1,
     creado_en           TEXT NOT NULL DEFAULT (datetime('now','localtime'))

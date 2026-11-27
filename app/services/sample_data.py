@@ -54,13 +54,15 @@ def seed_sample_data() -> str:
     # Gastos de ejemplo (para el balance trimestral)
     if conn.execute("SELECT COUNT(*) c FROM gastos").fetchone()["c"] == 0:
         hoy = date.today().isoformat()
-        for prov, nif, base, pct in [("Papelería Central S.L.", "B12345674", 80.0, 21.0),
-                                     ("Gestoría Ejemplo", "B76543214", 120.0, 21.0),
-                                     ("Librería Técnica", "B12345674", 45.0, 4.0)]:
+        for prov, nif, base, pct, ret_pct in [("Papelería Central S.L.", "B12345674", 80.0, 21.0, 0.0),
+                                              ("Gestoría Ejemplo", "B76543214", 120.0, 21.0, 15.0),
+                                              ("Librería Técnica", "B12345674", 45.0, 4.0, 0.0)]:
             cuota = round(base * pct / 100.0, 2)
+            total = round(base + cuota, 2)
+            ret = round(base * ret_pct / 100.0, 2)
             conn.execute("""INSERT INTO gastos (fecha, proveedor, nif_proveedor, concepto, base, porcentaje_iva,
-                            cuota_iva, total, iva_deducible, pagado) VALUES (?,?,?,?,?,?,?,?,1,1)""",
-                         (hoy, prov, nif, "Gasto de ejemplo", base, pct, cuota, round(base + cuota, 2)))
+                            cuota_iva, total, retencion_irpf, iva_deducible, pagado) VALUES (?,?,?,?,?,?,?,?,?,1,1)""",
+                         (hoy, prov, nif, "Gasto de ejemplo", base, pct, cuota, total, ret))
 
     # Facturas de ejemplo (solo si no hay)
     if conn.execute("SELECT COUNT(*) c FROM facturas").fetchone()["c"] == 0:
@@ -80,7 +82,8 @@ def seed_sample_data() -> str:
             (prod_rows[1]["id"], prod_rows[1]["nombre"], 2, float(prod_rows[1]["importe_base"]), iva_pct(prod_rows[1]["tipo_iva_id"]), prod_rows[1]["tipo_iva_id"]),
         ]
         _crear_factura(conn, "2026-000001", date.today().isoformat(), c1["id"], c1["dni_cif"] or "",
-                       nif_emisor, lineas1, estado_cobro_inicial="parcial", importe_cobro=40.0)
+                       nif_emisor, lineas1, estado_cobro_inicial="parcial", importe_cobro=40.0,
+                       retencion_pct=15.0)
         # Factura 2: pagada
         c2 = clientes[1]
         lineas2 = [
@@ -93,7 +96,8 @@ def seed_sample_data() -> str:
     conn.close()
     return "Datos de ejemplo cargados. Todo correcto."
 
-def _crear_factura(conn, numero, fecha, cliente_id, nif_receptor, nif_emisor, lineas, estado_cobro_inicial="no_cobrada", importe_cobro=None):
+def _crear_factura(conn, numero, fecha, cliente_id, nif_receptor, nif_emisor, lineas,
+                   estado_cobro_inicial="no_cobrada", importe_cobro=None, retencion_pct=0.0):
     # calcular totales
     base_total = 0.0
     iva_total = 0.0
@@ -106,6 +110,8 @@ def _crear_factura(conn, numero, fecha, cliente_id, nif_receptor, nif_emisor, li
         iva_total = round(iva_total + iva_linea, 2)
         lineas_calc.append((pid, concepto, cant, base, pct, tid, base_linea, iva_linea, total_linea))
     total_factura = round(base_total + iva_total, 2)
+    retencion = round(base_total * (retencion_pct or 0) / 100.0, 2)
+    a_cobrar = round(total_factura - retencion, 2)
     # hash
     last = conn.execute("SELECT hash_registro FROM registros_facturacion ORDER BY id DESC LIMIT 1").fetchone()
     hash_anterior = last["hash_registro"] if last else None
@@ -113,10 +119,10 @@ def _crear_factura(conn, numero, fecha, cliente_id, nif_receptor, nif_emisor, li
     qr_payload = qr_payload_url(numero, nif_emisor, hash_reg)
     # insert factura
     cur = conn.execute("""INSERT INTO facturas (numero, fecha_emision, cliente_id, base_imponible, total_iva,
-                          total_factura, estado, estado_cobro, pendiente, hash_registro, hash_anterior)
-                          VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-                       (numero, fecha, cliente_id, base_total, iva_total, total_factura, "emitida",
-                        "no_cobrada", total_factura, hash_reg, hash_anterior))
+                          total_factura, retencion_irpf, estado, estado_cobro, pendiente, hash_registro, hash_anterior)
+                          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       (numero, fecha, cliente_id, base_total, iva_total, total_factura, retencion, "emitida",
+                        "no_cobrada", a_cobrar, hash_reg, hash_anterior))
     fid = cur.lastrowid
     for i, (pid, concepto, cant, base, pct, tid, bl, il, tl) in enumerate(lineas_calc):
         conn.execute("""INSERT INTO lineas_factura (factura_id, orden, producto_id, concepto, cantidad,
@@ -142,13 +148,13 @@ def _crear_factura(conn, numero, fecha, cliente_id, nif_receptor, nif_emisor, li
     # cobro
     if estado_cobro_inicial == "pagada":
         conn.execute("""INSERT INTO cobros (factura_id, fecha_cobro, importe, forma_pago) VALUES (?,?,?,?)""",
-                     (fid, fecha, total_factura, "Transferencia"))
+                     (fid, fecha, a_cobrar, "Transferencia"))
         conn.execute("UPDATE facturas SET estado_cobro='pagada', pendiente=0 WHERE id=?", (fid,))
     elif estado_cobro_inicial == "parcial":
-        imp = importe_cobro if importe_cobro is not None else round(total_factura / 2, 2)
+        imp = importe_cobro if importe_cobro is not None else round(a_cobrar / 2, 2)
         conn.execute("""INSERT INTO cobros (factura_id, fecha_cobro, importe, forma_pago) VALUES (?,?,?,?)""",
                      (fid, fecha, imp, "Transferencia"))
-        pend = round(total_factura - imp, 2)
+        pend = round(a_cobrar - imp, 2)
         conn.execute("UPDATE facturas SET estado_cobro=?, pendiente=? WHERE id=?",
                      ("parcial" if pend > 0 else "pagada", max(pend, 0), fid))
     return fid

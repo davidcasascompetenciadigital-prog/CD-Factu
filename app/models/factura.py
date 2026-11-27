@@ -31,6 +31,8 @@ class Factura:
     base_imponible: float = 0.0
     total_iva: float = 0.0
     total_factura: float = 0.0
+    retencion_irpf: float = 0.0      # importe retenido por el cliente (€)
+    retencion_pct: float = 0.0       # porcentaje de retención aplicado (%)
     desglose_iva: dict = field(default_factory=dict)  # {pct: (base, cuota)}
     estado: str = "emitida"
     estado_cobro: str = "no_cobrada"
@@ -45,7 +47,7 @@ class Factura:
         self.base_imponible = round(sum(l.base_linea for l in self.lineas), 2)
         self.total_iva = round(sum(l.iva_linea for l in self.lineas), 2)
         self.total_factura = round(self.base_imponible + self.total_iva, 2)
-        self.pendiente = self.total_factura
+        self.pendiente = round(self.total_factura - self.retencion_irpf, 2)
         # desglose por tipo de IVA
         d = {}
         for l in self.lineas:
@@ -55,3 +57,9 @@ class Factura:
             d[pct][0] = round(d[pct][0] + l.base_linea, 2)
             d[pct][1] = round(d[pct][1] + l.iva_linea, 2)
         self.desglose_iva = {k: (v[0], v[1]) for k, v in d.items()}
+
+    def aplicar_retencion(self, pct: float):
+        """Retención de IRPF sobre la base imponible (la practica el cliente al pagar)."""
+        self.retencion_pct = round(float(pct or 0), 2)
+        self.retencion_irpf = round(self.base_imponible * self.retencion_pct / 100.0, 2)
+        self.pendiente = round(self.total_factura - self.retencion_irpf, 2)

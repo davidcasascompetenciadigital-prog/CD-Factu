@@ -279,8 +279,22 @@ class TabEmitir(QWidget):
         self.cmb_cobro.currentTextChanged.connect(lambda t: self.pago_frame.setVisible(t != "No cobrada"))
         v.addWidget(self.pago_frame)
 
-        # 5. Verifactu
-        v.addWidget(QLabel("5. Verifactu (Agencia Tributaria):"))
+        # 5. Retención de IRPF (la practica el cliente sobre la base imponible)
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Retención IRPF:"))
+        self.cmb_retencion = QComboBox()
+        for pct in (0, 7, 15, 19, 20, 21):
+            self.cmb_retencion.addItem(f"{pct}%", pct)
+        row.addWidget(self.cmb_retencion)
+        self.lbl_retencion = QLabel("Retención: 0,00 € · A cobrar del cliente: 0,00 €")
+        self.lbl_retencion.setStyleSheet("color:#aaaaaa; font-size:13px;")
+        row.addWidget(self.lbl_retencion)
+        row.addStretch()
+        v.addLayout(row)
+        self.cmb_retencion.currentIndexChanged.connect(self.recalcular_resumen)
+
+        # 6. Verifactu
+        v.addWidget(QLabel("6. Verifactu (Agencia Tributaria):"))
         row = QHBoxLayout()
         self.cmb_vf = QComboBox()
         self.cmb_vf.addItem("No enviar ahora", "no")
@@ -486,16 +500,19 @@ class TabEmitir(QWidget):
             self.refrescar_tabla()
             self.recalcular_resumen()
 
-    def recalcular_resumen(self):
+    def recalcular_resumen(self, *_):
         f = Factura(lineas=self.lineas)
         f.recalcular_totales()
+        pct = self.cmb_retencion.currentData() or 0
+        f.aplicar_retencion(pct)
         self.lbl_base.setText(f"Base imponible total: {f.base_imponible:.2f} €")
         self.lbl_iva.setText(f"IVA total: {f.total_iva:.2f} €")
         desglose_txt = "  |  ".join(f"IVA {pct:g}%: {cuota:.2f} €" for pct, (b, cuota) in f.desglose_iva.items())
-        # spec: "IVA 21%: 42,00 €"
-        desglose_txt = "  |  ".join(f"IVA {pct:g}%: {cuota:.2f} €" for pct, (b, cuota) in f.desglose_iva.items())
         self.lbl_desglose.setText(desglose_txt)
         self.lbl_total.setText(f"Total factura: {f.total_factura:.2f} €")
+        self.lbl_retencion.setText(
+            f"Retención {pct:g}% ({f.retencion_irpf:.2f} €) · A cobrar del cliente: {f.pendiente:.2f} €"
+        )
         self._totales_cache = f
 
     def emitir(self):
@@ -515,9 +532,11 @@ class TabEmitir(QWidget):
             nl.recalcular()
             f.lineas.append(nl)
         f.recalcular_totales()
+        f.aplicar_retencion(self.cmb_retencion.currentData() or 0)
         # cliente nombre para confirmación
         nombre_cliente = self.cliente_data.get("empresa") or f"{self.cliente_data['nombre']} {self.cliente_data.get('apellidos') or ''}".strip()
-        if not confirm(self, f"Vas a emitir una factura a {nombre_cliente} por {f.total_factura:.2f} €. ¿Es correcto?"):
+        if not confirm(self, f"Vas a emitir una factura a {nombre_cliente} por {f.total_factura:.2f} € "
+                             f"(a cobrar tras la retención: {f.pendiente:.2f} €). ¿Es correcto?"):
             return
         # número de factura
         conn = get_connection()
@@ -538,10 +557,10 @@ class TabEmitir(QWidget):
 
         # insert factura
         cur = conn.execute("""INSERT INTO facturas (numero, fecha_emision, cliente_id, base_imponible, total_iva,
-                              total_factura, estado, estado_cobro, pendiente, hash_registro, hash_anterior)
-                              VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                              total_factura, retencion_irpf, estado, estado_cobro, pendiente, hash_registro, hash_anterior)
+                              VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                            (numero, date.today().isoformat(), self.cliente_id, f.base_imponible,
-                            f.total_iva, f.total_factura, "emitida", "no_cobrada", f.total_factura,
+                            f.total_iva, f.total_factura, f.retencion_irpf, "emitida", "no_cobrada", f.pendiente,
                             hash_reg, hash_anterior))
         factura_id = cur.lastrowid
         # lineas
@@ -601,7 +620,7 @@ class TabEmitir(QWidget):
         # estado cobro inicial
         estado = self.cmb_cobro.currentText()
         if estado == "Cobrada totalmente":
-            imp = f.total_factura
+            imp = f.pendiente  # el cliente paga la factura menos la retención que le practica
             conn.execute("""INSERT INTO cobros (factura_id, fecha_cobro, importe, forma_pago) VALUES (?,?,?,?)""",
                          (factura_id, date.today().isoformat(), imp, self.cmb_forma.currentText()))
             conn.execute("UPDATE facturas SET estado_cobro='pagada', pendiente=0 WHERE id=?", (factura_id,))
@@ -613,7 +632,7 @@ class TabEmitir(QWidget):
             conn.execute("""INSERT INTO cobros (factura_id, fecha_cobro, importe, forma_pago) VALUES (?,?,?,?)""",
                          (factura_id, self.inp_fecha_cobro.text() or date.today().isoformat(),
                           imp, self.cmb_forma.currentText()))
-            pend = round(f.total_factura - imp, 2)
+            pend = round(f.pendiente - imp, 2)
             nuevo_estado = "pagada" if pend <= 0 else "parcial"
             conn.execute("UPDATE facturas SET estado_cobro=?, pendiente=? WHERE id=?",
                          (nuevo_estado, max(pend, 0), factura_id))
@@ -634,6 +653,7 @@ class TabEmitir(QWidget):
         self.cliente_data = None
         self.lbl_cliente.setText("Ningún cliente seleccionado")
         self.refrescar_tabla()
+        self.cmb_retencion.setCurrentIndex(0)
         self.recalcular_resumen()
         self.cmb_cobro.setCurrentText("No cobrada")
         self.pago_frame.setVisible(False)
@@ -642,6 +662,7 @@ class TabEmitir(QWidget):
             self.parent.tab_facturas.refrescar()
             self.parent.tab_cobros.refrescar()
             self.parent.tab_balance.refrescar()
+            self.parent.tab_balance_anual.refrescar()
         except Exception:
             pass
         # Verifactu segun lo elegido (la factura ya esta emitida y guardada)

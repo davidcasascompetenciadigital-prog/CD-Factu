@@ -60,6 +60,19 @@ class TabGastos(QWidget):
         v.addLayout(row)
 
         row = QHBoxLayout()
+        row.addWidget(QLabel("Retención IRPF al proveedor:"))
+        self.cmb_retencion = QComboBox()
+        for pct in (0, 1, 2, 7, 15, 19, 20, 21):
+            self.cmb_retencion.addItem(f"{pct}%", pct)
+        row.addWidget(self.cmb_retencion)
+        self.lbl_retencion = QLabel("A pagar al proveedor: 0,00 €")
+        self.lbl_retencion.setStyleSheet("font-weight:bold;")
+        row.addWidget(self.lbl_retencion)
+        row.addStretch()
+        v.addLayout(row)
+        self.cmb_retencion.currentIndexChanged.connect(self._calc)
+
+        row = QHBoxLayout()
         self.chk_ded = QCheckBox("IVA deducible")
         self.chk_ded.setChecked(True)
         row.addWidget(self.chk_ded)
@@ -87,8 +100,8 @@ class TabGastos(QWidget):
         row.addStretch()
         v.addLayout(row)
 
-        self.tabla = QTableWidget(0, 8)
-        self.tabla.setHorizontalHeaderLabels(["Fecha", "Proveedor", "Nº factura", "Base", "IVA %", "Cuota", "Total", "Estado"])
+        self.tabla = QTableWidget(0, 9)
+        self.tabla.setHorizontalHeaderLabels(["Fecha", "Proveedor", "Nº factura", "Base", "IVA %", "Cuota", "Total", "Ret. IRPF", "Estado"])
         self.tabla.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -119,9 +132,13 @@ class TabGastos(QWidget):
         pct = self.cmb_iva.currentData() or 0
         if base is None:
             self.lbl_calc.setText("Cuota: 0,00 €   Total: 0,00 €")
+            self.lbl_retencion.setText("A pagar al proveedor: 0,00 €")
             return
         cuota = round(base * pct / 100.0, 2)
-        self.lbl_calc.setText(f"Cuota: {cuota:.2f} €   Total: {base + cuota:.2f} €".replace(".", ","))
+        total = round(base + cuota, 2)
+        ret = round(base * (self.cmb_retencion.currentData() or 0) / 100.0, 2)
+        self.lbl_calc.setText(f"Cuota: {cuota:.2f} €   Total: {total:.2f} €".replace(".", ","))
+        self.lbl_retencion.setText(f"A pagar al proveedor: {total - ret:.2f} €".replace(".", ","))
 
     def guardar(self):
         if not self.inp_prov.text().strip():
@@ -140,18 +157,21 @@ class TabGastos(QWidget):
             return
         pct = float(self.cmb_iva.currentData() or 0)
         cuota = round(base * pct / 100.0, 2)
+        total = round(base + cuota, 2)
+        ret = round(base * (self.cmb_retencion.currentData() or 0) / 100.0, 2)
         conn = get_connection()
         conn.execute("""INSERT INTO gastos (fecha, proveedor, nif_proveedor, numero_factura, concepto,
-                        base, porcentaje_iva, cuota_iva, total, iva_deducible, pagado)
-                        VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                        base, porcentaje_iva, cuota_iva, total, retencion_irpf, iva_deducible, pagado)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                      (self.inp_fecha.date().toString("yyyy-MM-dd"), self.inp_prov.text().strip(),
                       nif.upper(), self.inp_num.text().strip(), self.inp_conc.text().strip(),
-                      base, pct, cuota, round(base + cuota, 2),
+                      base, pct, cuota, total, ret,
                       1 if self.chk_ded.isChecked() else 0, 1 if self.chk_pag.isChecked() else 0))
         conn.commit()
         conn.close()
         for w in (self.inp_prov, self.inp_nif, self.inp_num, self.inp_conc, self.inp_base):
             w.clear()
+        self.cmb_retencion.setCurrentIndex(0)
         self.refrescar()
         self._avisar_balance()
         info(self, "Gasto guardado. Todo correcto.")
@@ -167,14 +187,16 @@ class TabGastos(QWidget):
                 f = date.fromisoformat(r["fecha"]).strftime("%d/%m/%Y")
             except ValueError:
                 f = r["fecha"]
+            ret = r["retencion_irpf"] if "retencion_irpf" in r.keys() else 0
             vals = [f, r["proveedor"], r["numero_factura"] or "", f"{r['base']:.2f} €",
                     f"{r['porcentaje_iva']:g}%", f"{r['cuota_iva']:.2f} €", f"{r['total']:.2f} €",
+                    f"{ret:.2f} €",
                     ("Pagado" if r["pagado"] else "Pendiente de pago") + ("" if r["iva_deducible"] else " · IVA no deducible")]
             for c, val in enumerate(vals):
                 it = QTableWidgetItem(val)
                 if c == 0:
                     it.setData(Qt.ItemDataRole.UserRole, r["id"])
-                if c in (3, 4, 5, 6):
+                if c in (3, 4, 5, 6, 7):
                     it.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.tabla.setItem(i, c, it)
 
@@ -212,5 +234,6 @@ class TabGastos(QWidget):
     def _avisar_balance(self):
         try:
             self.parent.tab_balance.refrescar()
+            self.parent.tab_balance_anual.refrescar()
         except Exception:
             pass

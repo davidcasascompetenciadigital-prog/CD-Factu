@@ -7,6 +7,8 @@
 - Gestión de empresa, clientes, productos y facturas.
 - Emisión de facturas en PDF con QR Verifactu.
 - Control de cobros y estado de pago.
+- Retención de IRPF en facturas emitidas y en facturas recibidas.
+- Balance trimestral (modelo 303) y **balance anual (modelo 390 + previsión de IRPF)**.
 - Anulación/rectificación de facturas (sin borrar).
 - Copia de seguridad automática.
 - Funciona sin conexión a internet (datos locales).
@@ -41,8 +43,21 @@ David Casas M.
 - GitHub: davidcasascompetenciadigital-prog
 
 ## Versión
-0.0.5 (integración de las versiones 0.0.3/0.0.4 del autor con las novedades 0.0.2)
+0.0.6 (balance anual: resumen de IVA y previsión de IRPF)
 
+
+---
+
+## Novedades de la versión 0.0.6
+
+- **Balance anual:** nueva pantalla con el resumen del año para el **modelo 390** (IVA devengado y deducible por tipo,
+  resultado del régimen general, volumen de operaciones y desglose por trimestres). Genera hoja de trabajo en **PDF/CSV**.
+- **Previsión de IRPF:** calcula el rendimiento neto estimado (facturación sin IVA − gastos − IVA no deducible), aplica un
+  **tipo efectivo configurable** (20 % por defecto) y resta las retenciones sufridas. Muestra aparte las retenciones
+  practicadas a proveedores, que se declaran en el modelo 111 y no reducen tu cuota.
+- **Retenciones:** al emitir facturas se puede aplicar el porcentaje de retención (0/7/15/19/20/21 %); el PDF muestra la
+  retención y el importe a cobrar. Al registrar gastos ocurre lo mismo (0/1/2/7/15/19/20/21 %), con su columna en la tabla.
+- **Aviso:** la previsión de IRPF es orientativa y no sustituye la escala de tu Comunidad Autónoma ni el asesoramiento profesional.
 
 ---
 

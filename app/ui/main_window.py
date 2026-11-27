@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (QMainWindow, QStackedWidget, QWidget, QVBoxLayout
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap, QIcon
 
-from ..config import resource_path
+from ..config import resource_path, APP_VERSION
 from ..db.database import get_connection
 from ..ui.styles import GLOBAL_QSS
 from ..ui.widgets import title_label, big_button, help_popup, info
@@ -20,6 +20,7 @@ from .tab_facturas import TabFacturas
 from .tab_servicios import TabServicios
 from .tab_gastos import TabGastos
 from .tab_balance import TabBalance
+from .tab_balance_anual import TabBalanceAnual
 
 PAGES = [
     ("Mis datos de empresa", "tab_empresa"),
@@ -71,6 +72,7 @@ MENU_ITEMS = [
     ("📄", "Facturas emitidas", "Consulta, imprime y gestiona facturas.", "tab_facturas"),
     ("🧮", "Gastos", "Apunta las facturas que recibes de proveedores.", "tab_gastos"),
     ("📊", "Balance trimestral", "Ingresos, gastos, cobros e IVA del trimestre (modelo 303).", "tab_balance"),
+    ("📅", "Balance anual", "Resumen anual de IVA (modelo 390) y previsión de IRPF.", "tab_balance_anual"),
 ]
 
 class MainMenu(QWidget):
@@ -161,6 +163,7 @@ class MainWindow(QMainWindow):
         self.tab_servicios = TabServicios(self)
         self.tab_gastos = TabGastos(self)
         self.tab_balance = TabBalance(self)
+        self.tab_balance_anual = TabBalanceAnual(self)
 
         self.pages = {
             "tab_empresa": self.tab_empresa,
@@ -172,6 +175,7 @@ class MainWindow(QMainWindow):
             "tab_servicios": self.tab_servicios,
             "tab_gastos": self.tab_gastos,
             "tab_balance": self.tab_balance,
+            "tab_balance_anual": self.tab_balance_anual,
         }
         for key in self.pages:
             self.stack.addWidget(self.pages[key])
@@ -182,7 +186,7 @@ class MainWindow(QMainWindow):
         self.footer = QHBoxLayout()
         self.lbl_prog = QLabel("Programa: CD Factu")
         self.lbl_emp = QLabel("Empresa: -")
-        self.lbl_ver = QLabel("Versión: 0.0.2")
+        self.lbl_ver = QLabel(f"Versión: {APP_VERSION}")
         for l in (self.lbl_prog, self.lbl_emp, self.lbl_ver):
             l.setStyleSheet("color:#aaaaaa; font-size:12px;")
             self.footer.addWidget(l)
@@ -214,6 +218,8 @@ class MainWindow(QMainWindow):
         try:
             if key == "tab_balance":
                 self.tab_balance.refrescar()
+            elif key == "tab_balance_anual":
+                self.tab_balance_anual.refrescar()
             elif key == "tab_gastos":
                 self.tab_gastos.cargar_ivas()
             elif key == "tab_servicios":
@@ -254,6 +260,8 @@ class MainWindow(QMainWindow):
             except Exception: pass
             try: self.tab_balance.refrescar()
             except Exception: pass
+            try: self.tab_balance_anual.refrescar()
+            except Exception: pass
             info(self, msg)
         except Exception as e:
             error(self, f"No se pudieron cargar los datos de ejemplo: {e}")
@@ -278,7 +286,7 @@ class MainWindow(QMainWindow):
         title.setStyleSheet("font-size:24px; font-weight:bold; color:#4caf50;")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         v.addWidget(title)
-        ver = QLabel("Versión 0.0.2")
+        ver = QLabel(f"Versión {APP_VERSION}")
         ver.setAlignment(Qt.AlignmentFlag.AlignCenter)
         ver.setStyleSheet("color:#aaaaaa; font-size:12px;")
         v.addWidget(ver)

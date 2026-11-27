@@ -72,6 +72,11 @@ def _bloque_factura(story, factura, empresa, cliente, lineas, desglose, qr_path,
     story.append(Spacer(1, 4*mm))
     story.append(Paragraph(f"<b>Base imponible total: {factura.base_imponible:.2f} €</b>", normal))
     story.append(Paragraph(f"<b>Total factura: {factura.total_factura:.2f} €</b>", title))
+    retencion = getattr(factura, "retencion_irpf", 0) or 0
+    if retencion:
+        pct = getattr(factura, "retencion_pct", 0) or 0
+        story.append(Paragraph(f"Retención IRPF ({pct:g}%): −{retencion:.2f} €", normal))
+        story.append(Paragraph(f"<b>Total a cobrar del cliente: {factura.total_factura - retencion:.2f} €</b>", title))
 
     # Registro Mercantil
     reg = getattr(empresa, "registro_mercantil", None)

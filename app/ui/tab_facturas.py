@@ -247,6 +247,8 @@ class TabFacturas(QWidget):
         f.id = fr["id"]; f.numero = fr["numero"]; f.fecha_emision = fr["fecha_emision"]
         f.base_imponible = fr["base_imponible"]; f.total_iva = fr["total_iva"]
         f.total_factura = fr["total_factura"]
+        f.retencion_irpf = fr["retencion_irpf"] if "retencion_irpf" in fr.keys() else 0
+        f.retencion_pct = round(f.retencion_irpf * 100 / f.base_imponible, 2) if f.base_imponible and f.retencion_irpf else 0
         f.lineas = []
         for l in lineas:
             nl = LineaFactura(concepto=l["concepto"], cantidad=l["cantidad"], importe_base=l["importe_base"],

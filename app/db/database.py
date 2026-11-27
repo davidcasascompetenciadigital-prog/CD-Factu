@@ -56,6 +56,13 @@ def init_db() -> None:
         conn.execute("ALTER TABLE clientes ADD COLUMN email TEXT")
     if "notas" not in ccols:
         conn.execute("ALTER TABLE clientes ADD COLUMN notas TEXT")
+    # Migración IRPF: retenciones en facturas emitidas y gastos recibidos
+    fcols = [r["name"] for r in conn.execute("PRAGMA table_info(facturas)").fetchall()]
+    if "retencion_irpf" not in fcols:
+        conn.execute("ALTER TABLE facturas ADD COLUMN retencion_irpf REAL NOT NULL DEFAULT 0")
+    gcols = [r["name"] for r in conn.execute("PRAGMA table_info(gastos)").fetchall()]
+    if "retencion_irpf" not in gcols:
+        conn.execute("ALTER TABLE gastos ADD COLUMN retencion_irpf REAL NOT NULL DEFAULT 0")
     conn.commit()
     conn.close()
 
