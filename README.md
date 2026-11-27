@@ -42,3 +42,21 @@ David Casas M.
 
 ## Versión
 0.0.1 (inicial)
+
+## Ejecución en Linux
+
+### Desde código fuente
+```bash
+pip install -r requirements.txt
+python3 main.py
+```
+
+### Compilar ejecutable (Linux)
+```bash
+pip install pyinstaller
+pyinstaller --onefile --windowed --name "CD-Factu" \
+  --add-data "assets:assets" --add-data "app/db/schema.sql:app/db" main.py
+./dist/CD-Factu
+```
+
+Los datos se guardan en `~/.local/share/CD Factu/` y las copias de seguridad en `~/Desktop/Backup_Facturas` (o en `$HOME` si no existe el Escritorio).

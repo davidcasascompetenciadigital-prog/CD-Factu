@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=CD Factu
+Comment=Programa de facturación para autónomos y micropymes
+Exec=bash -c 'cd /opt/cd-factu && python3 main.py'
+Icon=cd-factu
+Type=Application
+Categories=Office;Finance;
+Terminal=false

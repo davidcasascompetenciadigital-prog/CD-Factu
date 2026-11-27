@@ -1,19 +1,25 @@
 ﻿# main.py
-import sys, ctypes, subprocess, os
-from ctypes import wintypes
+import sys, os
 
 def _msg(titulo, texto, flags=0x40):
-    try:
-        ctypes.windll.user32.MessageBoxW(None, texto, titulo, flags)
-    except Exception:
-        pass
+    # En Windows usa MessageBoxW; en Linux imprime a consola
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(None, texto, titulo, flags)
+            return
+        except Exception:
+            pass
+    print(f"[{titulo}] {texto}")
 
 def ensure_runtime():
-    # Verificar runtime de Visual C++ (necesario en Windows antiguos)
+    # Solo tiene sentido en Windows
+    if sys.platform != "win32":
+        return
+    import ctypes, subprocess
     try:
         ctypes.CDLL("vcruntime140.dll")
     except OSError:
-        # Intento de instalación automática (best-effort)
         _msg("CD Factu", "Falta el runtime de Visual C++. Se intentará instalar automáticamente.", 0x40)
         try:
             subprocess.run(["winget", "install", "--id", "Microsoft.VCRedist.2015+.x64",
@@ -27,7 +33,6 @@ def ensure_runtime():
             _msg("CD Factu", "No se pudo instalar el runtime automáticamente.\n"
                              "Descárguelo desde Microsoft y vuelva a ejecutar el programa.", 0x10)
             sys.exit(1)
-    # Verificar versión mínima de Windows
     try:
         ver = sys.getwindowsversion()
         if ver.major < 10:
@@ -71,4 +76,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
