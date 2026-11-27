@@ -123,12 +123,16 @@ class TabEmitir(QWidget):
         self.cliente_id = None
         self.cliente_data = None
         self.lineas = []
-        v = QVBoxLayout(self)
-        v.setSpacing(10)
-        v.addWidget(title_label("Emitir factura"))
+        outer = QHBoxLayout(self)
+        outer.setSpacing(16)
+
+        # ===== Columna izquierda: formulario =====
+        left = QVBoxLayout()
+        left.setSpacing(10)
+        left.addWidget(title_label("Emitir factura"))
 
         # 1. Cliente
-        v.addWidget(QLabel("1. Cliente:"))
+        left.addWidget(QLabel("1. Cliente:"))
         row = QHBoxLayout()
         self.lbl_cliente = QLabel("Ningún cliente seleccionado")
         self.lbl_cliente.setStyleSheet("font-size:16px; padding:8px; background:#fff; border:1px solid #bdbdbd; border-radius:6px;")
@@ -136,10 +140,10 @@ class TabEmitir(QWidget):
         btn_sel = big_button("Elegir cliente", "primary")
         btn_sel.clicked.connect(self.elegir_cliente)
         row.addWidget(btn_sel)
-        v.addLayout(row)
+        left.addLayout(row)
 
         # 2. Líneas
-        v.addWidget(QLabel("2. Líneas de factura:"))
+        left.addWidget(QLabel("2. Líneas de factura:"))
         row = QHBoxLayout()
         btn_prod = big_button("Añadir producto de la lista", "primary")
         btn_prod.clicked.connect(self.add_producto)
@@ -148,42 +152,23 @@ class TabEmitir(QWidget):
         btn_manual.clicked.connect(self.add_manual)
         row.addWidget(btn_manual)
         row.addStretch()
-        v.addLayout(row)
+        left.addLayout(row)
 
         self.tabla = QTableWidget(0, 5)
         self.tabla.setHorizontalHeaderLabels(["Concepto", "Base", "IVA", "Total línea", ""])
         self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setMinimumHeight(180)
-        v.addWidget(self.tabla)
-
-        # 3. Resumen
-        v.addWidget(QLabel("3. Resumen automático:"))
-        self.lbl_base = QLabel("Base imponible total: 0,00 €")
-        self.lbl_iva = QLabel("IVA: 0,00 €")
-        self.lbl_desglose = QLabel("")
-        self.lbl_total = QLabel("Total factura: 0,00 €")
-        self.lbl_total.setStyleSheet("font-size:20px; font-weight:bold;")
-        # Resumen alineado a la derecha
-        resumen = QWidget()
-        rv = QVBoxLayout(resumen)
-        rv.setContentsMargins(0, 0, 0, 0)
-        for l in (self.lbl_base, self.lbl_iva, self.lbl_desglose, self.lbl_total):
-            l.setAlignment(Qt.AlignmentFlag.AlignRight)
-            rv.addWidget(l)
-        fila_resumen = QHBoxLayout()
-        fila_resumen.addStretch()
-        fila_resumen.addWidget(resumen)
-        v.addLayout(fila_resumen)
+        left.addWidget(self.tabla)
 
         # 4. Estado de cobro
-        v.addWidget(QLabel("4. Estado de cobro inicial:"))
+        left.addWidget(QLabel("4. Estado de cobro inicial:"))
         row = QHBoxLayout()
         self.cmb_cobro = QComboBox()
         self.cmb_cobro.addItems(["No cobrada", "Cobrada totalmente", "Cobrada parcialmente"])
         row.addWidget(self.cmb_cobro)
         row.addStretch()
-        v.addLayout(row)
+        left.addLayout(row)
 
         # Campos pago (mini-formulario) visibles si cobrada
         self.pago_frame = QWidget()
@@ -200,7 +185,7 @@ class TabEmitir(QWidget):
         pf.addLayout(r)
         self.pago_frame.setVisible(False)
         self.cmb_cobro.currentTextChanged.connect(lambda t: self.pago_frame.setVisible(t != "No cobrada"))
-        v.addWidget(self.pago_frame)
+        left.addWidget(self.pago_frame)
 
         # Botones
         row = QHBoxLayout()
@@ -211,8 +196,32 @@ class TabEmitir(QWidget):
         btn_help.clicked.connect(lambda: help_popup(self, ayuda("emitir")))
         row.addWidget(btn_help)
         row.addStretch()
-        v.addLayout(row)
-        v.addStretch()
+        left.addLayout(row)
+        left.addStretch()
+
+        # ===== Columna derecha: resumen automático =====
+        right = QVBoxLayout()
+        right.setSpacing(10)
+        right.addWidget(QLabel("3. Resumen automático:"))
+        from PySide6.QtWidgets import QFrame
+        box = QFrame()
+        box.setStyleSheet("background:#1e1e1e; border:1px solid #3a3a3a; border-radius:10px;")
+        bv = QVBoxLayout(box)
+        bv.setContentsMargins(14, 14, 14, 14)
+        self.lbl_base = QLabel("Base imponible total: 0,00 €")
+        self.lbl_iva = QLabel("IVA: 0,00 €")
+        self.lbl_desglose = QLabel("")
+        self.lbl_total = QLabel("Total factura: 0,00 €")
+        self.lbl_total.setStyleSheet("font-size:20px; font-weight:bold; color:#4caf50;")
+        for l in (self.lbl_base, self.lbl_iva, self.lbl_desglose, self.lbl_total):
+            l.setAlignment(Qt.AlignmentFlag.AlignRight)
+            bv.addWidget(l)
+        bv.addStretch()
+        right.addWidget(box)
+        right.addStretch()
+
+        outer.addLayout(left, 2)
+        outer.addLayout(right, 1)
 
     def elegir_cliente(self):
         dlg = SelectorClienteDialog(self)
