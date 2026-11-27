@@ -25,22 +25,32 @@ class VisorFacturaDialog(QDialog):
         v = QVBoxLayout(self)
         f = data["factura"]; e = data["empresa"]; c = data["cliente"]
 
-        # Cabecera empresa
-        lbl = QLabel(f"<b>{e.nombre}</b>")
-        lbl.setStyleSheet("font-size:18px;")
-        v.addWidget(lbl)
-        v.addWidget(QLabel(f"NIF: {e.nif}"))
-        v.addWidget(QLabel(f"{e.direccion}, {e.cp} {e.ciudad}"))
-        v.addWidget(QLabel(f"{e.comunidad_autonoma}, {e.pais}"))
-
         v.addWidget(QLabel(f"<b>FACTURA Nº {f.numero}</b>"))
         v.addWidget(QLabel(f"Fecha: {f.fecha_emision}"))
 
-        v.addWidget(QLabel("<b>Cliente:</b>"))
-        v.addWidget(QLabel(c.nombre_mostrar()))
+        # Dos columnas: emisor (izq) y cliente (der)
+        cols = QHBoxLayout()
+        # Emisor
+        left = QVBoxLayout()
+        left.addWidget(QLabel("<b>Emisor:</b>"))
+        left.addWidget(QLabel(f"<b>{e.nombre}</b>"))
+        left.addWidget(QLabel(f"NIF: {e.nif}"))
+        left.addWidget(QLabel(f"{e.direccion}, {e.cp} {e.ciudad}"))
+        left.addWidget(QLabel(f"{e.comunidad_autonoma}, {e.pais}"))
+        if getattr(e, "registro_mercantil", None):
+            left.addWidget(QLabel(f"Reg. Mercantil: {e.registro_mercantil}"))
+        left.addStretch()
+        # Cliente
+        right = QVBoxLayout()
+        right.addWidget(QLabel("<b>Cliente:</b>"))
+        right.addWidget(QLabel(c.nombre_mostrar()))
         dni = c.dni_cif if hasattr(c, "dni_cif") else ""
-        v.addWidget(QLabel(f"NIF/CIF: {dni}"))
-        v.addWidget(QLabel(f"{c.direccion}, {c.cp} {c.ciudad}"))
+        right.addWidget(QLabel(f"NIF/CIF: {dni}"))
+        right.addWidget(QLabel(f"{c.direccion}, {c.cp} {c.ciudad}"))
+        right.addStretch()
+        cols.addLayout(left, 1)
+        cols.addLayout(right, 1)
+        v.addLayout(cols)
 
         # Líneas
         v.addWidget(QLabel("<b>Líneas:</b>"))
@@ -77,15 +87,6 @@ class VisorFacturaDialog(QDialog):
                 v.addWidget(QLabel(f"  - {c.get('fecha','')}: {float(c.get('importe',0)):.2f} € ({c.get('forma_pago','')})"))
         else:
             v.addWidget(QLabel("Sin cobros registrados."))
-
-        # QR
-        if os.path.exists(data["qr_path"]):
-            from PySide6.QtGui import QPixmap
-            lbl_qr = QLabel()
-            pix = QPixmap(data["qr_path"]).scaled(120, 120)
-            lbl_qr.setPixmap(pix)
-            v.addWidget(lbl_qr)
-            v.addWidget(QLabel("Código de verificación (Verifactu)"))
 
         # Botones
         row = QHBoxLayout()
