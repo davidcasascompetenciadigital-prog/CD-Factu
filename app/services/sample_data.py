@@ -116,7 +116,7 @@ def _crear_factura(conn, numero, fecha, cliente_id, nif_receptor, nif_emisor, li
     last = conn.execute("SELECT hash_registro FROM registros_facturacion ORDER BY id DESC LIMIT 1").fetchone()
     hash_anterior = last["hash_registro"] if last else None
     hash_reg = hash_registro_factura(numero, fecha, nif_emisor, nif_receptor, base_total, total_factura, hash_anterior)
-    qr_payload = qr_payload_url(numero, nif_emisor, hash_reg)
+    qr_payload = qr_payload_url(numero, nif_emisor, fecha, total_factura, False)
     # insert factura
     cur = conn.execute("""INSERT INTO facturas (numero, fecha_emision, cliente_id, base_imponible, total_iva,
                           total_factura, retencion_irpf, estado, estado_cobro, pendiente, hash_registro, hash_anterior)

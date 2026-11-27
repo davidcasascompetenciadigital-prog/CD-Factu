@@ -1,7 +1,8 @@
 # app/ui/tab_emitir.py
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
                                QComboBox, QPushButton, QTableWidget, QTableWidgetItem,
-                               QHeaderView, QMessageBox, QDialog, QListWidget, QListWidgetItem, QTextEdit)
+                               QHeaderView, QMessageBox, QDialog, QListWidget, QListWidgetItem, QTextEdit,
+                                QFrame, QSizePolicy)
 from PySide6.QtCore import Qt
 from datetime import date
 import os
@@ -27,6 +28,7 @@ class SelectorClienteDialog(QDialog):
         self.lbl_hint = QLabel("Escribe al menos 4 caracteres para ver sugerencias.")
         v.addWidget(self.lbl_hint)
         self.lista = QListWidget()
+        self.lista.itemDoubleClicked.connect(lambda it: self.accept())
         v.addWidget(self.lista)
         btn = big_button("Elegir", "primary")
         btn.clicked.connect(self.accept)
@@ -70,12 +72,12 @@ class SelectorClienteDialog(QDialog):
     def filtrar(self, texto):
         self.lista.clear()
         t = (texto or "").strip().lower()
-        if len(t) < 4:
-            self.lbl_hint.setText("Escribe al menos 4 caracteres para ver sugerencias.")
-            return
-        self.lbl_hint.setText(f"Sugerencias para: {texto.strip()}")
+        if not t:
+            self.lbl_hint.setText("Listado de clientes. Doble clic para seleccionar.")
+        else:
+            self.lbl_hint.setText(f"Sugerencias para: {texto.strip()}")
         for c in self.clientes:
-            if t in self._texto_cliente(c):
+            if (not t) or (t in self._texto_cliente(c)):
                 nombre = (c["nombre"] + " " + c["apellidos"]).strip()
                 if c["empresa"]:
                     nombre += f"  |  Empresa: {c['empresa']}"
@@ -99,6 +101,7 @@ class SelectorProductoDialog(QDialog):
         self.setMinimumSize(500, 400)
         v = QVBoxLayout(self)
         self.lista = QListWidget()
+        self.lista.itemDoubleClicked.connect(lambda it: self.accept())
         v.addWidget(self.lista)
         btn = big_button("Añadir", "primary")
         btn.clicked.connect(self.accept)
@@ -186,36 +189,44 @@ class TabEmitir(QWidget):
         self.cliente_id = None
         self.cliente_data = None
         self.lineas = []
-        v = QVBoxLayout(self)
-        v.setSpacing(10)
-        v.addWidget(title_label("Emitir factura"))
+        outer = QHBoxLayout(self)
+        outer.setSpacing(16)
 
-        # 1. Cliente (búsqueda inline del autor + botón de compatibilidad)
-        v.addWidget(QLabel("1. Cliente:"))
+        # ===== Columna izquierda: formulario =====
+        left = QVBoxLayout()
+        left.setSpacing(10)
+        left.addWidget(title_label("Emitir factura"))
+
+        # 1. Cliente: búsqueda inline + botón de listado (autor)
+        left.addWidget(QLabel("1. Cliente:"))
         self.lbl_cliente = QLabel("Ningún cliente seleccionado")
-        self.lbl_cliente.setStyleSheet("font-size:16px; padding:8px; background:#2a2a2a; border:1px solid #3a3a3a; border-radius:6px;")
-        v.addWidget(self.lbl_cliente)
+        self.lbl_cliente.setStyleSheet(
+            "font-size:16px; padding:8px; background:#2a2a2a; border:1px solid #3a3a3a; border-radius:6px;")
+        left.addWidget(self.lbl_cliente)
         self.inp_buscar_cliente = QLineEdit()
         self.inp_buscar_cliente.setPlaceholderText("Buscar cliente (nombre, CIF, email, teléfono)...")
         self.inp_buscar_cliente.textChanged.connect(self.filtrar_clientes)
-        v.addWidget(self.inp_buscar_cliente)
+        left.addWidget(self.inp_buscar_cliente)
         self.lista_clientes = QListWidget()
         self.lista_clientes.setMaximumHeight(150)
         self.lista_clientes.itemClicked.connect(self.seleccionar_cliente_lista)
-        v.addWidget(self.lista_clientes)
+        left.addWidget(self.lista_clientes)
         self._clientes = []
         self.cargar_clientes()
         row = QHBoxLayout()
+        btn_listado = big_button("Listado de clientes", "secondary")
+        btn_listado.clicked.connect(self.abrir_listado_clientes)
+        row.addWidget(btn_listado)
         btn_sel = big_button("Elegir cliente", "primary")
         btn_sel.clicked.connect(self.elegir_cliente)
         row.addWidget(btn_sel)
         row.addStretch()
-        v.addLayout(row)
+        left.addLayout(row)
 
         # 2. Líneas
-        v.addWidget(QLabel("2. Líneas de factura:"))
+        left.addWidget(QLabel("2. Líneas de factura:"))
         row = QHBoxLayout()
-        btn_prod = big_button("Añadir producto de la lista", "primary")
+        btn_prod = big_button("Añadir producto", "primary")
         btn_prod.clicked.connect(self.add_producto)
         row.addWidget(btn_prod)
         btn_serv = big_button("Añadir servicio", "primary")
@@ -225,89 +236,110 @@ class TabEmitir(QWidget):
         btn_manual.clicked.connect(self.add_manual)
         row.addWidget(btn_manual)
         row.addStretch()
-        v.addLayout(row)
+        left.addLayout(row)
 
-        self.tabla = QTableWidget(0, 5)
-        self.tabla.setHorizontalHeaderLabels(["Concepto", "Base", "IVA", "Total línea", ""])
+        self.tabla = QTableWidget(0, 7)
+        self.tabla.setHorizontalHeaderLabels(["Concepto", "Cantidad", "Precio", "Dto.%", "IVA", "Total", "Quitar"])
         self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setMinimumHeight(180)
-        v.addWidget(self.tabla)
+        self.tabla.verticalHeader().setDefaultSectionSize(32)
+        self.tabla.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        left.addWidget(self.tabla)
+        left.addStretch()
 
-        # 3. Resumen
-        v.addWidget(QLabel("3. Resumen automático:"))
+        # ===== Columna derecha: resumen y opciones =====
+        right = QVBoxLayout()
+        right.setSpacing(10)
+        right.addWidget(QLabel("3. Resumen automático:"))
+        box = QFrame()
+        box.setStyleSheet("background:#1e1e1e; border:1px solid #3a3a3a; border-radius:10px;")
+        bv = QVBoxLayout(box)
+        bv.setContentsMargins(14, 14, 14, 14)
         self.lbl_base = QLabel("Base imponible total: 0,00 €")
-        self.lbl_iva = QLabel("IVA: 0,00 €")
+        self.lbl_iva = QLabel("IVA total: 0,00 €")
         self.lbl_desglose = QLabel("")
         self.lbl_total = QLabel("Total factura: 0,00 €")
-        self.lbl_total.setStyleSheet("font-size:20px; font-weight:bold;")
-        # Resumen alineado a la derecha
-        resumen = QWidget()
-        rv = QVBoxLayout(resumen)
-        rv.setContentsMargins(0, 0, 0, 0)
-        for l in (self.lbl_base, self.lbl_iva, self.lbl_desglose, self.lbl_total):
+        self.lbl_total.setStyleSheet("font-size:20px; font-weight:bold; color:#4caf50;")
+        self.lbl_retencion = QLabel("Retención: 0,00 € · A cobrar del cliente: 0,00 €")
+        self.lbl_retencion.setStyleSheet("color:#aaaaaa; font-size:13px;")
+        for l in (self.lbl_base, self.lbl_iva, self.lbl_desglose, self.lbl_total, self.lbl_retencion):
             l.setAlignment(Qt.AlignmentFlag.AlignRight)
-            rv.addWidget(l)
-        fila_resumen = QHBoxLayout()
-        fila_resumen.addStretch()
-        fila_resumen.addWidget(resumen)
-        v.addLayout(fila_resumen)
+            bv.addWidget(l)
+        bv.addStretch()
+        right.addWidget(box)
+
+        # Retención IRPF (la practica el cliente)
+        right.addWidget(QLabel("Retención IRPF (la practica el cliente sobre la base imponible):"))
+        row = QHBoxLayout()
+        self.cmb_retencion = QComboBox()
+        for pct in (0, 7, 15, 19, 20, 21):
+            self.cmb_retencion.addItem(f"{pct}%", pct)
+        row.addWidget(self.cmb_retencion)
+        row.addStretch()
+        right.addLayout(row)
+        self.cmb_retencion.currentIndexChanged.connect(self.recalcular_resumen)
+
+        # Datos del cliente seleccionado
+        right.addWidget(QLabel("Datos del cliente:"))
+        box_cli = QFrame()
+        box_cli.setStyleSheet("background:#1e1e1e; border:1px solid #3a3a3a; border-radius:10px;")
+        bcv = QVBoxLayout(box_cli)
+        bcv.setContentsMargins(14, 14, 14, 14)
+        self.lbl_cli_datos = QLabel("Ningún cliente seleccionado")
+        self.lbl_cli_datos.setWordWrap(True)
+        self.lbl_cli_datos.setStyleSheet("font-size:13px; color:#dddddd;")
+        bcv.addWidget(self.lbl_cli_datos)
+        bcv.addStretch()
+        right.addWidget(box_cli)
 
         # 4. Estado de cobro
-        v.addWidget(QLabel("4. Estado de cobro inicial:"))
+        right.addWidget(QLabel("4. Estado de cobro inicial:"))
         row = QHBoxLayout()
         self.cmb_cobro = QComboBox()
         self.cmb_cobro.addItems(["No cobrada", "Cobrada totalmente", "Cobrada parcialmente"])
         row.addWidget(self.cmb_cobro)
         row.addStretch()
-        v.addLayout(row)
+        right.addLayout(row)
 
-        # Campos pago (mini-formulario) visibles si cobrada
+        # Campos de pago visibles si está cobrada
         self.pago_frame = QWidget()
         pf = QVBoxLayout(self.pago_frame)
         r = QHBoxLayout()
-        r.addWidget(QLabel("Importe a cobrar:")); self.inp_importe_cobro = QLineEdit(); r.addWidget(self.inp_importe_cobro)
+        r.addWidget(QLabel("Importe a cobrar:"))
+        self.inp_importe_cobro = QLineEdit()
+        r.addWidget(self.inp_importe_cobro)
         pf.addLayout(r)
         r = QHBoxLayout()
-        r.addWidget(QLabel("Forma de pago:")); self.cmb_forma = QComboBox()
-        self.cmb_forma.addItems(["Efectivo","Transferencia","Tarjeta","Bizum","Cheque","Otro"]); r.addWidget(self.cmb_forma)
+        r.addWidget(QLabel("Forma de pago:"))
+        self.cmb_forma = QComboBox()
+        self.cmb_forma.addItems(["Efectivo", "Transferencia", "Tarjeta", "Bizum", "Cheque", "Otro"])
+        r.addWidget(self.cmb_forma)
         pf.addLayout(r)
         r = QHBoxLayout()
-        r.addWidget(QLabel("Fecha:")); self.inp_fecha_cobro = QLineEdit(date.today().isoformat()); r.addWidget(self.inp_fecha_cobro)
+        r.addWidget(QLabel("Fecha:"))
+        self.inp_fecha_cobro = QLineEdit(date.today().isoformat())
+        r.addWidget(self.inp_fecha_cobro)
         pf.addLayout(r)
         self.pago_frame.setVisible(False)
         self.cmb_cobro.currentTextChanged.connect(lambda t: self.pago_frame.setVisible(t != "No cobrada"))
-        v.addWidget(self.pago_frame)
+        right.addWidget(self.pago_frame)
 
-        # 5. Retención de IRPF (la practica el cliente sobre la base imponible)
-        row = QHBoxLayout()
-        row.addWidget(QLabel("Retención IRPF:"))
-        self.cmb_retencion = QComboBox()
-        for pct in (0, 7, 15, 19, 20, 21):
-            self.cmb_retencion.addItem(f"{pct}%", pct)
-        row.addWidget(self.cmb_retencion)
-        self.lbl_retencion = QLabel("Retención: 0,00 € · A cobrar del cliente: 0,00 €")
-        self.lbl_retencion.setStyleSheet("color:#aaaaaa; font-size:13px;")
-        row.addWidget(self.lbl_retencion)
-        row.addStretch()
-        v.addLayout(row)
-        self.cmb_retencion.currentIndexChanged.connect(self.recalcular_resumen)
-
-        # 6. Verifactu
-        v.addWidget(QLabel("6. Verifactu (Agencia Tributaria):"))
+        # 5. Verifactu
+        right.addWidget(QLabel("5. Verifactu (Agencia Tributaria):"))
         row = QHBoxLayout()
         self.cmb_vf = QComboBox()
         self.cmb_vf.addItem("No enviar ahora", "no")
         self.cmb_vf.addItem("Ver vista previa Verifactu (no se envía)", "previa")
         self.cmb_vf.addItem("Enviar al entorno de PRUEBAS de la AEAT", "pruebas")
         self.cmb_vf.addItem("Enviar a la AEAT (REAL)", "real")
-        self.cmb_vf.setMinimumWidth(420)
+        self.cmb_vf.setMinimumWidth(340)
         row.addWidget(self.cmb_vf)
         self.lbl_vf = QLabel("")
+        self.lbl_vf.setWordWrap(True)
         self.lbl_vf.setStyleSheet("color:#aaaaaa; font-size:13px;")
         row.addWidget(self.lbl_vf)
-        row.addStretch()
-        v.addLayout(row)
+        right.addLayout(row)
         self.cmb_vf.currentIndexChanged.connect(self._aviso_vf)
         self._vf_por_defecto()
 
@@ -316,21 +348,26 @@ class TabEmitir(QWidget):
         btn_emitir = big_button("EMITIR FACTURA Y GENERAR PDF", "primary")
         btn_emitir.clicked.connect(self.emitir)
         row.addWidget(btn_emitir)
-        btn_help = big_button("?", "secondary"); btn_help.setFixedWidth(60)
+        btn_help = big_button("?", "secondary")
+        btn_help.setFixedWidth(60)
         btn_help.clicked.connect(lambda: help_popup(self, ayuda("emitir")))
         row.addWidget(btn_help)
         row.addStretch()
-        v.addLayout(row)
-        v.addStretch()
+        right.addLayout(row)
+        right.addStretch()
+
+        outer.addLayout(left, 2)
+        outer.addLayout(right, 1)
 
     def _vf_por_defecto(self):
-        """Preselecciona segun la configuracion de empresa (nunca envia sin pedir confirmacion)."""
+        """Preselecciona según la configuración de empresa (nunca envía sin confirmación)."""
         try:
             conn = get_connection()
             r = conn.execute("SELECT verifactu_enabled, verifactu_mode FROM empresa WHERE id=1").fetchone()
             conn.close()
             if r and r["verifactu_enabled"]:
-                self.cmb_vf.setCurrentIndex(self.cmb_vf.findData("real" if r["verifactu_mode"] == "real" else "pruebas"))
+                data = "real" if r["verifactu_mode"] == "real" else "pruebas"
+                self.cmb_vf.setCurrentIndex(self.cmb_vf.findData(data))
         except Exception:
             pass
         self._aviso_vf()
@@ -345,7 +382,7 @@ class TabEmitir(QWidget):
     def cargar_clientes(self):
         conn = get_connection()
         rows = conn.execute("""SELECT id, nombre, apellidos, empresa, dni_cif, direccion, cp, ciudad
-                               FROM clientes""").fetchall()
+                               FROM clientes ORDER BY nombre""").fetchall()
         contacts = conn.execute("SELECT cliente_id, telefono, email FROM contactos_cliente").fetchall()
         conn.close()
         contact_map = {}
@@ -391,21 +428,45 @@ class TabEmitir(QWidget):
 
     def seleccionar_cliente_lista(self, item):
         cid = item.data(Qt.ItemDataRole.UserRole)
-        if cid is None:
-            return
-        self.cliente_id = cid
-        for c in self._clientes:
-            if c["id"] == cid:
-                self.cliente_data = c
-                break
-        c = self.cliente_data
-        self.lbl_cliente.setText((c["nombre"] + " " + c["apellidos"]).strip() +
-                                (f"  |  Empresa: {c['empresa']}" if c["empresa"] else ""))
+        if cid is not None:
+            self._set_cliente(cid)
 
     def elegir_cliente(self):
         # compatibilidad: abre el primer resultado filtrado
         if self.lista_clientes.count() > 0:
             self.seleccionar_cliente_lista(self.lista_clientes.item(0))
+
+    def abrir_listado_clientes(self):
+        dlg = SelectorClienteDialog(self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            cid = dlg.seleccionado_id()
+            if cid is not None:
+                self._set_cliente(cid)
+
+    def _set_cliente(self, cid):
+        self.cliente_id = cid
+        conn = get_connection()
+        r = conn.execute("""SELECT id, nombre, apellidos, empresa, dni_cif, direccion, cp, ciudad,
+                            comunidad_autonoma, pais FROM clientes WHERE id=?""", (cid,)).fetchone()
+        contacts = conn.execute("SELECT telefono, email FROM contactos_cliente WHERE cliente_id=?", (cid,)).fetchall()
+        conn.close()
+        if not r:
+            return
+        self.cliente_data = dict(r)
+        tels = ", ".join(c["telefono"] for c in contacts if c["telefono"])
+        emails = ", ".join(c["email"] for c in contacts if c["email"])
+        self.cliente_data["telefonos"] = tels
+        self.cliente_data["emails"] = emails
+        nombre = f"{r['nombre']} {r['apellidos'] or ''}".strip()
+        self.lbl_cliente.setText(nombre + (f"  |  Empresa: {r['empresa']}" if r["empresa"] else ""))
+        datos = (f"Nombre: {nombre}\n"
+                 f"Empresa: {r['empresa'] or '-'}\n"
+                 f"NIF/CIF: {r['dni_cif'] or '-'}\n"
+                 f"Dirección: {r['direccion'] or '-'}\n"
+                 f"CP/Ciudad: {r['cp'] or ''} {r['ciudad'] or ''}\n"
+                 f"Teléfono: {tels or '-'}\n"
+                 f"Email: {emails or '-'}")
+        self.lbl_cli_datos.setText(datos)
 
     def add_producto(self):
         dlg = SelectorProductoDialog(self)
@@ -483,14 +544,58 @@ class TabEmitir(QWidget):
         self.tabla.setRowCount(0)
         for i, l in enumerate(self.lineas):
             self.tabla.insertRow(i)
-            self.tabla.setItem(i, 0, QTableWidgetItem(l.concepto.split("\n", 1)[0]))
-            self.tabla.setItem(i, 1, QTableWidgetItem(f"{l.base_linea:.2f} €"))
-            self.tabla.setItem(i, 2, QTableWidgetItem(f"{l.porcentaje_iva:g}%"))
-            self.tabla.setItem(i, 3, QTableWidgetItem(f"{l.total_linea:.2f} €"))
+            self.tabla.setItem(i, 0, QTableWidgetItem(l.concepto))
+            # Cantidad (editable)
+            from PySide6.QtWidgets import QLineEdit
+            inp_cant = QLineEdit(f"{l.cantidad:g}")
+            inp_cant.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            inp_cant.textChanged.connect(lambda t, idx=i: self._cambiar_cantidad(idx, t))
+            self.tabla.setCellWidget(i, 1, inp_cant)
+            it_precio = QTableWidgetItem(f"{l.importe_base:.2f} €")
+            it_precio.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(i, 2, it_precio)
+            # Descuento % (editable)
+            inp_desc = QLineEdit(f"{l.descuento:g}")
+            inp_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            inp_desc.textChanged.connect(lambda t, idx=i: self._cambiar_descuento(idx, t))
+            self.tabla.setCellWidget(i, 3, inp_desc)
+            it_iva = QTableWidgetItem(f"{l.porcentaje_iva:g}%")
+            it_iva.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.tabla.setItem(i, 4, it_iva)
+            it_total = QTableWidgetItem(f"{l.total_linea:.2f} €")
+            it_total.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.tabla.setItem(i, 5, it_total)
             btn = big_button("Quitar", "danger")
-            btn.setMinimumWidth(90)
+            btn.setFixedHeight(32)
             btn.clicked.connect(lambda checked, idx=i: self.quitar_linea(idx))
-            self.tabla.setCellWidget(i, 4, btn)
+            self.tabla.setCellWidget(i, 6, btn)
+        self.tabla.setMinimumHeight(max(180, self.tabla.rowCount() * 34 + 40))
+
+    def _cambiar_cantidad(self, idx, texto):
+        if idx < 0 or idx >= len(self.lineas):
+            return
+        try:
+            c = float((texto or "1").replace(",", "."))
+            if c <= 0:
+                c = 1.0
+        except ValueError:
+            c = 1.0
+        self.lineas[idx].cantidad = c
+        self.lineas[idx].recalcular()
+        self.refrescar_tabla()
+        self.recalcular_resumen()
+
+    def _cambiar_descuento(self, idx, texto):
+        if idx < 0 or idx >= len(self.lineas):
+            return
+        try:
+            d = float((texto or "0").replace(",", "."))
+        except ValueError:
+            d = 0.0
+        self.lineas[idx].descuento = d
+        self.lineas[idx].recalcular()
+        self.refrescar_tabla()
+        self.recalcular_resumen()
 
     def quitar_linea(self, idx):
         if not confirm(self, "¿Seguro que quieres quitar esta línea?"):
@@ -527,8 +632,8 @@ class TabEmitir(QWidget):
         f.lineas = []
         for l in self.lineas:
             nl = LineaFactura(concepto=l.concepto, cantidad=l.cantidad, importe_base=l.importe_base,
-                              porcentaje_iva=l.porcentaje_iva, producto_id=l.producto_id,
-                              tipo_iva_id=l.tipo_iva_id)
+                              porcentaje_iva=l.porcentaje_iva, descuento=l.descuento,
+                              producto_id=l.producto_id, tipo_iva_id=l.tipo_iva_id)
             nl.recalcular()
             f.lineas.append(nl)
         f.recalcular_totales()
@@ -549,11 +654,12 @@ class TabEmitir(QWidget):
         hash_anterior = last["hash_registro"] if last else None
         nif_receptor = self.cliente_data.get("dni_cif") or ""
         # nif emisor
-        emp = conn.execute("SELECT nif FROM empresa WHERE id=1").fetchone()
-        nif_emisor = emp["nif"] if emp else ""
+        emp = conn.execute("SELECT nif, verifactu_enabled FROM empresa WHERE id=1").fetchone()
+        nif_emisor = (emp["nif"] if emp else "") or ""
+        verificable = bool(emp["verifactu_enabled"]) if emp and "verifactu_enabled" in emp.keys() else False
         hash_reg = hash_registro_factura(numero, date.today().isoformat(), nif_emisor, nif_receptor,
                                         f.base_imponible, f.total_factura, hash_anterior)
-        qr_payload = qr_payload_url(numero, nif_emisor, hash_reg)
+        qr_payload = qr_payload_url(numero, nif_emisor, date.today().isoformat(), f.total_factura, verificable)
 
         # insert factura
         cur = conn.execute("""INSERT INTO facturas (numero, fecha_emision, cliente_id, base_imponible, total_iva,
@@ -652,6 +758,7 @@ class TabEmitir(QWidget):
         self.cliente_id = None
         self.cliente_data = None
         self.lbl_cliente.setText("Ningún cliente seleccionado")
+        self.lbl_cli_datos.setText("Ningún cliente seleccionado")
         self.refrescar_tabla()
         self.cmb_retencion.setCurrentIndex(0)
         self.recalcular_resumen()

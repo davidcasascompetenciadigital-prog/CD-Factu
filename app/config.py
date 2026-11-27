@@ -36,7 +36,7 @@ COLOR_CARD  = "#ffffff"
 
 
 # --- Datos del sistema informatico de facturacion (SIF) -> bloque <SistemaInformatico> del registro Verifactu
-APP_VERSION = "0.0.6"
+APP_VERSION = "0.0.7"
 SISTEMA_NOMBRE = "CD Factu"
 SISTEMA_ID = "CD"                     # identificador del SIF (2 caracteres)
 PRODUCTOR_NOMBRE = "David Casas M."   # razon social del productor del software

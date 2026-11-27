@@ -8,6 +8,7 @@ class LineaFactura:
     cantidad: float = 1.0
     importe_base: float = 0.0       # unitario sin IVA
     porcentaje_iva: float = 21.0
+    descuento: float = 0.0          # descuento en %
     producto_id: Optional[int] = None
     tipo_iva_id: Optional[int] = None
     # calculados
@@ -16,7 +17,8 @@ class LineaFactura:
     total_linea: float = 0.0
 
     def recalcular(self):
-        self.base_linea = round(self.cantidad * self.importe_base, 2)
+        base = self.cantidad * self.importe_base * (1 - (self.descuento or 0.0) / 100.0)
+        self.base_linea = round(base, 2)
         self.iva_linea = round(self.base_linea * self.porcentaje_iva / 100.0, 2)
         self.total_linea = round(self.base_linea + self.iva_linea, 2)
 

@@ -1,15 +1,19 @@
 # app/ui/main_window.py
 from PySide6.QtWidgets import (QMainWindow, QStackedWidget, QWidget, QVBoxLayout,
                                QHBoxLayout, QLabel, QPushButton, QGridLayout, QMessageBox)
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Slot
+from pathlib import Path
 from PySide6.QtGui import QPixmap, QIcon
 
-from ..config import resource_path, APP_VERSION
+from ..config import resource_path, APP_VERSION, BACKUP_DIR
 from ..db.database import get_connection
 from ..ui.styles import GLOBAL_QSS
 from ..ui.widgets import title_label, big_button, help_popup, info
 from ..utils.messages import ayuda
 from ..services.sample_data import seed_sample_data
+from ..version import VERSION, RELEASES_URL, API_URL
+from ..updater import descargar_y_actualizar
+from ..services.backup import backup_semanal, listar_backups, restaurar_backup
 
 from .tab_empresa import TabEmpresa
 from .tab_clientes import TabClientes
@@ -131,13 +135,23 @@ class MainWindow(QMainWindow):
         header.addWidget(title_label("CD Factu"))
         header.addStretch()
         btn_menu = big_button("Menú principal", "secondary")
-        btn_menu.setFixedWidth(150)
+        btn_menu.setFixedWidth(170)
         btn_menu.clicked.connect(lambda: self.stack.setCurrentIndex(0))
         header.addWidget(btn_menu)
-        btn_sample = big_button("Datos de ejemplo", "secondary")
-        btn_sample.setFixedWidth(160)
-        btn_sample.clicked.connect(self.cargar_ejemplos)
-        header.addWidget(btn_sample)
+        self.btn_sample = big_button("Datos de ejemplo", "secondary")
+        self.btn_sample.setFixedWidth(160)
+        self.btn_sample.clicked.connect(self.cargar_ejemplos)
+        header.addWidget(self.btn_sample)
+
+        btn_backup = big_button("Backup", "secondary")
+        btn_backup.setFixedWidth(120)
+        btn_backup.clicked.connect(self.hacer_backup)
+        header.addWidget(btn_backup)
+
+        btn_restore = big_button("Restaurar", "secondary")
+        btn_restore.setFixedWidth(120)
+        btn_restore.clicked.connect(self.restaurar_backup_ui)
+        header.addWidget(btn_restore)
         btn_about = big_button("Acerca de", "secondary")
         btn_about.setFixedWidth(120)
         btn_about.clicked.connect(self.mostrar_acerca_de)
@@ -195,6 +209,7 @@ class MainWindow(QMainWindow):
 
         self.actualizar_footer()
         self.stack.setCurrentIndex(0)
+        self.verificar_actualizacion()
 
     def primera_ejecucion(self):
         """Pregunta por datos de ejemplo (se llama con la ventana ya visible y sin el logo de carga)."""
@@ -231,6 +246,68 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+    def verificar_actualizacion(self):
+        import threading, json, urllib.request
+        def worker():
+            try:
+                req = urllib.request.Request(API_URL, headers={"User-Agent": "CD-Factu"})
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                tag = (data.get("tag_name") or "").strip().lstrip("v")
+                if not tag:
+                    return
+                def parse(v):
+                    parts = []
+                    for p in v.split("."):
+                        num = ""
+                        for ch in p:
+                            if ch.isdigit():
+                                num += ch
+                            else:
+                                break
+                        parts.append(int(num) if num else 0)
+                    return tuple(parts)
+                if parse(tag) > parse(VERSION):
+                    self._release_data = data
+                    from PySide6.QtCore import QMetaObject, Qt as _Qt
+                    QMetaObject.invokeMethod(self, "_mostrar_aviso_actualizacion",
+                                            _Qt.ConnectionType.QueuedConnection,
+                                            __import__("PySide6.QtCore", fromlist=["Q_ARG"]).Q_ARG(str, tag))
+            except Exception:
+                pass
+        threading.Thread(target=worker, daemon=True).start()
+
+    @Slot(str)
+    def _mostrar_aviso_actualizacion(self, nueva):
+        from PySide6.QtWidgets import QMessageBox
+        r = QMessageBox.question(self, "Nueva versión disponible",
+                                 f"Hay una nueva versión disponible: v{nueva}\n"
+                                 f"Tu versión actual es v{VERSION}.\n\n"
+                                 "¿Deseas descargarla e instalarla ahora?\n"
+                                 "(Se respetarán tus datos existentes.)",
+                                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if r == QMessageBox.StandardButton.Yes:
+            data = getattr(self, "_release_data", None)
+            if data:
+                descargar_y_actualizar(self, data)
+            else:
+                from PySide6.QtGui import QDesktopServices
+                from PySide6.QtCore import QUrl
+                QDesktopServices.openUrl(QUrl(RELEASES_URL))
+
+    @Slot(str)
+    def _error_actualizacion(self, msg):
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.warning(self, "Actualización", f"No se pudo actualizar: {msg}")
+
+    def closeEvent(self, event):
+        # Backup automático al cerrar el programa (preserva los datos del usuario)
+        try:
+            backup_semanal()
+        except Exception:
+            pass
+        super().closeEvent(event)
+
     def actualizar_footer(self):
         try:
             conn = get_connection()
@@ -266,9 +343,35 @@ class MainWindow(QMainWindow):
         except Exception as e:
             error(self, f"No se pudieron cargar los datos de ejemplo: {e}")
 
+    def hacer_backup(self):
+        from ..ui.widgets import info, error
+        try:
+            p = backup_semanal()
+            info(self, f"Copia de seguridad creada:\n{p}")
+        except Exception as e:
+            error(self, f"No se pudo crear la copia de seguridad: {e}")
+
+    def restaurar_backup_ui(self):
+        from ..ui.widgets import confirm, info, error
+        from PySide6.QtWidgets import QFileDialog
+        backups = listar_backups()
+        carpeta = str(BACKUP_DIR if backups else Path.home())
+        path, _ = QFileDialog.getOpenFileName(self, "Seleccionar copia de seguridad", carpeta,
+                                              "Base de datos (*.db);;Todos los archivos (*)")
+        if not path:
+            return
+        if not confirm(self, "¿Restaurar la copia de seguridad seleccionada?\n"
+                             "Se creará una copia de la BD actual antes de restaurar.\n"
+                             "Será necesario reiniciar el programa."):
+            return
+        if restaurar_backup(Path(path)):
+            info(self, "Copia restaurada correctamente. Reinicie el programa para aplicar los cambios.")
+        else:
+            error(self, "No se pudo restaurar la copia de seguridad.")
+
     def mostrar_acerca_de(self):
         from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton
-        from PySide6.QtCore import Qt
+        from PySide6.QtCore import Qt, Slot
         dlg = QDialog(self)
         dlg.setWindowTitle("Acerca de CD Factu")
         dlg.setMinimumWidth(420)

@@ -248,13 +248,13 @@ class TabClientes(QWidget):
 
         # Botones
         row = QHBoxLayout()
-        btn_nuevo = big_button("Añadir nuevo cliente", "primary")
+        btn_nuevo = big_button("Añadir cliente", "primary")
         btn_nuevo.clicked.connect(self.nuevo_cliente)
         row.addWidget(btn_nuevo)
-        btn_editar = big_button("Editar seleccionado", "secondary")
+        btn_editar = big_button("Editar", "secondary")
         btn_editar.clicked.connect(self.editar_seleccionado)
         row.addWidget(btn_editar)
-        btn_borrar = big_button("Borrar cliente", "danger")
+        btn_borrar = big_button("Borrar", "danger")
         btn_borrar.clicked.connect(self.borrar_seleccionado)
         row.addWidget(btn_borrar)
         btn_help = big_button("?", "secondary")

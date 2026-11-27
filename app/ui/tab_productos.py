@@ -41,7 +41,7 @@ class TabProductos(QWidget):
         left.addLayout(row)
 
         row = QHBoxLayout()
-        btn_guardar = big_button("GUARDAR PRODUCTO", "primary")
+        btn_guardar = big_button("GUARDAR", "primary")
         btn_guardar.clicked.connect(self.guardar)
         row.addWidget(btn_guardar)
         btn_help = big_button("?", "secondary"); btn_help.setFixedWidth(60)
