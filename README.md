@@ -29,6 +29,33 @@ Esta es la versión para **Linux** (código fuente + ejecutable AppImage). No re
 - Copia de seguridad y restauración de datos.
 - Funciona sin conexión a internet (datos locales).
 
+
+## Capturas de pantalla
+
+### Menú principal
+![Menú principal](docs/screenshots/01_menu_principal.png)
+
+### Mis datos de empresa
+![Mis datos de empresa](docs/screenshots/02_datos_empresa.png)
+
+### Clientes
+![Clientes](docs/screenshots/03_clientes.png)
+
+### Productos
+![Productos](docs/screenshots/04_productos.png)
+
+### Emitir factura
+![Emitir factura](docs/screenshots/05_emitir_factura.png)
+
+### Facturas emitidas
+![Facturas emitidas](docs/screenshots/06_facturas_emitidas.png)
+
+### Certificado Verifactu
+![Certificado Verifactu](docs/screenshots/07_certificado_verifactu.png)
+
+### Factura generada (PDF)
+![Factura generada](docs/screenshots/08_factura_ejemplo.png)
+
 ## Instalación
 
 ### Opción 1: AppImage (recomendado, sin instalación)
