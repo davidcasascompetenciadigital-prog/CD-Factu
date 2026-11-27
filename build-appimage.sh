@@ -36,5 +36,5 @@ APPRUN
 chmod +x AppDir/AppRun
 
 # 3. Generar AppImage
-ARCH=x86_64 appimagetool AppDir CD-Factu-x86_64.AppImage
+ARCH=x86_64 /home/houses/Herramientas/appimagetool.AppImage AppDir CD-Factu-x86_64.AppImage
 echo "AppImage generado: CD-Factu-x86_64.AppImage"
