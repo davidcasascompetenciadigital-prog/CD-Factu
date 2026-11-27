@@ -41,9 +41,9 @@ class TabEmpresa(QWidget):
             col = QVBoxLayout()
             col.setSpacing(4)
             b = big_button(nombre, "secondary")
-            b.setFixedWidth(150)
+            b.setFixedWidth(160)
             b.setFixedHeight(36)
-            b.setStyleSheet(b.styleSheet() + "font-size:13px;")
+            b.setStyleSheet(b.styleSheet() + "font-size:12px;")
             b.clicked.connect(lambda checked=False, n=nombre: self._cambiar_pagina(n))
             col.addWidget(b, alignment=Qt.AlignmentFlag.AlignCenter)
             lbl = QLabel(EXPLICACIONES[nombre])
@@ -250,7 +250,7 @@ class TabEmpresa(QWidget):
 
         # Botones
         row = QHBoxLayout()
-        btn_guardar = big_button("GUARDAR DATOS", "primary")
+        btn_guardar = big_button("GUARDAR", "primary")
         btn_guardar.clicked.connect(self.guardar)
         row.addWidget(btn_guardar)
         btn_help = big_button("?", "secondary")

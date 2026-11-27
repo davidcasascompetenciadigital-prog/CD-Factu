@@ -153,7 +153,7 @@ class TabFacturas(QWidget):
         btn_anular = big_button("Anular / Rectificar", "danger")
         btn_anular.clicked.connect(self.anular)
         row.addWidget(btn_anular)
-        btn_export = big_button("Exportar para mi asesor", "secondary")
+        btn_export = big_button("Exportar asesor", "secondary")
         btn_export.clicked.connect(self.exportar)
         row.addWidget(btn_export)
         btn_help = big_button("?", "secondary"); btn_help.setFixedWidth(60)
@@ -403,7 +403,7 @@ class TabFacturas(QWidget):
         hash_reg = hash_registro_factura(r["numero"] + "-ANUL", r["fecha_emision"], emp["nif"], nif_rec,
                                         r["base_imponible"], r["total_factura"], hash_anterior)
         from ..services.hash_chain import qr_payload_url
-        qr_payload = qr_payload_url(r["numero"] + "-ANUL", emp["nif"], hash_reg)
+        qr_payload = qr_payload_url(r["numero"] + "-ANUL", emp["nif"], r["fecha_emision"], r["total_factura"], False)
         conn.execute("""INSERT INTO registros_facturacion (factura_id, tipo, numero_factura, fecha_emision,
                         nif_emisor, nif_receptor, base_imponible, total_factura, hash_registro,
                         hash_anterior, qr_payload) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
