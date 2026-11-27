@@ -35,6 +35,18 @@ exec "${HERE}/usr/bin/CD-Factu" "$@"
 APPRUN
 chmod +x AppDir/AppRun
 
+# 3. Localizar o descargar appimagetool
+if command -v appimagetool >/dev/null 2>&1; then
+    APPIMAGETOOL="appimagetool"
+elif [ -x "/home/houses/Herramientas/appimagetool.AppImage" ]; then
+    APPIMAGETOOL="/home/houses/Herramientas/appimagetool.AppImage"
+else
+    echo "Descargando appimagetool..."
+    wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O /tmp/appimagetool.AppImage
+    chmod +x /tmp/appimagetool.AppImage
+    APPIMAGETOOL="/tmp/appimagetool.AppImage"
+fi
+
 # 3. Generar AppImage
-ARCH=x86_64 /home/houses/Herramientas/appimagetool.AppImage AppDir CD-Factu-x86_64.AppImage
+ARCH=x86_64 "$APPIMAGETOOL" AppDir CD-Factu-x86_64.AppImage
 echo "AppImage generado: CD-Factu-x86_64.AppImage"
