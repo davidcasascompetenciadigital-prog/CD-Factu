@@ -1,7 +1,9 @@
 # app/ui/tab_empresa.py
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-                               QComboBox, QPushButton, QFileDialog, QMessageBox, QCheckBox)
+                               QComboBox, QPushButton, QFileDialog, QMessageBox, QCheckBox,
+                               QStackedWidget, QTextEdit, QFrame, QScrollArea)
 from PySide6.QtGui import QPixmap
+from PySide6.QtCore import Qt
 from ..db.database import get_connection
 from ..ui.widgets import big_button, title_label, help_popup, info, error
 from ..utils.messages import MSG_FALTA_NIF_EMPRESA, ayuda
@@ -12,6 +14,15 @@ COMUNIDADES = ["Andalucía","Aragón","Asturias","Baleares","Canarias","Cantabri
                "Castilla-La Mancha","Castilla y León","Cataluña","Extremadura",
                "Galicia","Madrid","Murcia","Navarra","País Vasco","La Rioja","Ceuta","Melilla"]
 
+EXPLICACIONES = {
+    "Datos de empresa": "Rellena los datos de tu negocio: nombre, NIF/CIF, dirección, etc. "
+                        "Se usarán en todas tus facturas.",
+    "Notas": "Anota aquí recordatorios internos de tu empresa (no aparecen en las facturas).",
+    "Datos Verifactu": "Configura el envío de facturas a la Agencia Tributaria (Verifactu). "
+                       "Es opcional; si no activas, tus facturas se guardan solo en local.",
+}
+
+
 class TabEmpresa(QWidget):
     def __init__(self, parent):
         super().__init__(parent)
@@ -20,11 +31,39 @@ class TabEmpresa(QWidget):
         v.setSpacing(12)
         v.addWidget(title_label("Mis datos de empresa"))
 
+        # --- Submenú ---
+        submenu = QHBoxLayout()
+        submenu.setSpacing(8)
+        self.btns_submenu = {}
+        self.pages = QStackedWidget()
+        for nombre in ("Datos de empresa", "Notas", "Datos Verifactu"):
+            col = QVBoxLayout()
+            col.setSpacing(4)
+            b = big_button(nombre, "secondary")
+            b.setFixedWidth(170)
+            b.clicked.connect(lambda checked=False, n=nombre: self._cambiar_pagina(n))
+            col.addWidget(b, alignment=Qt.AlignmentFlag.AlignCenter)
+            lbl = QLabel(EXPLICACIONES[nombre])
+            lbl.setWordWrap(True)
+            lbl.setStyleSheet("font-size:11px; color:#aaaaaa;")
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl.setFixedWidth(190)
+            col.addWidget(lbl, alignment=Qt.AlignmentFlag.AlignCenter)
+            submenu.addLayout(col)
+            self.btns_submenu[nombre] = b
+        submenu.addStretch()
+        v.addLayout(submenu)
+
+        # --- Página 1: Datos de empresa ---
+        page1 = QWidget()
+        p1 = QVBoxLayout(page1)
+        p1.setSpacing(8)
+
         row = QHBoxLayout()
         row.addWidget(QLabel("Nombre o razón social:"))
         self.inp_nombre = QLineEdit()
         row.addWidget(self.inp_nombre)
-        v.addLayout(row)
+        p1.addLayout(row)
 
         row = QHBoxLayout()
         row.addWidget(QLabel("NIF/CIF:"))
@@ -34,38 +73,38 @@ class TabEmpresa(QWidget):
         row.addWidget(self.inp_nif)
         self.lbl_nif_status = QLabel("")
         row.addWidget(self.lbl_nif_status)
-        v.addLayout(row)
+        p1.addLayout(row)
 
         row = QHBoxLayout()
         row.addWidget(QLabel("Dirección:"))
         self.inp_dir = QLineEdit()
         row.addWidget(self.inp_dir)
-        v.addLayout(row)
+        p1.addLayout(row)
 
         row = QHBoxLayout()
         row.addWidget(QLabel("Código Postal:"))
         self.inp_cp = QLineEdit()
         row.addWidget(self.inp_cp)
-        v.addLayout(row)
+        p1.addLayout(row)
 
         row = QHBoxLayout()
         row.addWidget(QLabel("Ciudad:"))
         self.inp_ciudad = QLineEdit()
         row.addWidget(self.inp_ciudad)
-        v.addLayout(row)
+        p1.addLayout(row)
 
         row = QHBoxLayout()
         row.addWidget(QLabel("Comunidad Autónoma:"))
         self.cmb_ccaa = QComboBox()
         self.cmb_ccaa.addItems(COMUNIDADES)
         row.addWidget(self.cmb_ccaa)
-        v.addLayout(row)
+        p1.addLayout(row)
 
         row = QHBoxLayout()
         row.addWidget(QLabel("País:"))
         self.inp_pais = QLineEdit("España")
         row.addWidget(self.inp_pais)
-        v.addLayout(row)
+        p1.addLayout(row)
 
         # Logotipo
         row = QHBoxLayout()
@@ -77,23 +116,42 @@ class TabEmpresa(QWidget):
         btn_logo.clicked.connect(self.elegir_logo)
         row.addWidget(btn_logo)
         row.addStretch()
-        v.addLayout(row)
+        p1.addLayout(row)
         self.logo_path = None
 
         # Tipos de IVA
-        v.addWidget(QLabel("Tipos de IVA que usas (separados por coma, ej: 21,10,4,0):"))
+        p1.addWidget(QLabel("Tipos de IVA que usas (separados por coma, ej: 21,10,4,0):"))
         self.inp_iva = QLineEdit("21,10,4,0")
-        v.addWidget(self.inp_iva)
+        p1.addLayout(self._wrap(self.inp_iva))
 
         # Registro Mercantil
         row = QHBoxLayout()
         row.addWidget(QLabel("Registro Mercantil (tomo, libro, folio, hoja, inscripción):"))
         self.inp_registro = QLineEdit()
         row.addWidget(self.inp_registro)
-        v.addLayout(row)
+        p1.addLayout(row)
 
-        # --- Verifactu ---
-        v.addWidget(QLabel("Configuración Verifactu (opcional):"))
+        p1.addStretch()
+        self.pages.addWidget(page1)
+
+        # --- Página 2: Notas ---
+        page2 = QWidget()
+        p2 = QVBoxLayout(page2)
+        p2.addWidget(QLabel("Notas internas de la empresa:"))
+        self.inp_notas = QTextEdit()
+        self.inp_notas.setPlaceholderText("Anota aquí recordatorios internos. No aparecen en las facturas.")
+        p2.addWidget(self.inp_notas)
+        p2.addStretch()
+        self.pages.addWidget(page2)
+
+        # --- Página 3: Datos Verifactu (dos columnas) ---
+        page3 = QWidget()
+        p3 = QHBoxLayout(page3)
+        p3.setSpacing(16)
+
+        # Columna izquierda: configuración
+        left = QVBoxLayout()
+        left.addWidget(QLabel("Configuración Verifactu (opcional):"))
         row = QHBoxLayout()
         self.chk_verifactu = QCheckBox("Activar Verifactu")
         row.addWidget(self.chk_verifactu)
@@ -102,7 +160,7 @@ class TabEmpresa(QWidget):
         self.cmb_vf_mode.addItems(["Prueba (preproducción)", "Real (producción)"])
         row.addWidget(self.cmb_vf_mode)
         row.addStretch()
-        v.addLayout(row)
+        left.addLayout(row)
 
         row = QHBoxLayout()
         row.addWidget(QLabel("Certificado público (.crt/.cer):"))
@@ -112,7 +170,7 @@ class TabEmpresa(QWidget):
         btn_cert.setFixedWidth(100)
         btn_cert.clicked.connect(lambda: self.elegir_archivo(self.inp_vf_cert, "Certificado (*.crt *.cer *.pem)"))
         row.addWidget(btn_cert)
-        v.addLayout(row)
+        left.addLayout(row)
 
         row = QHBoxLayout()
         row.addWidget(QLabel("Clave privada (.key/.pem):"))
@@ -122,18 +180,57 @@ class TabEmpresa(QWidget):
         btn_key.setFixedWidth(100)
         btn_key.clicked.connect(lambda: self.elegir_archivo(self.inp_vf_key, "Clave privada (*.key *.pem)"))
         row.addWidget(btn_key)
-        v.addLayout(row)
+        left.addLayout(row)
 
         row = QHBoxLayout()
         row.addWidget(QLabel("Contraseña del certificado:"))
         self.inp_vf_pass = QLineEdit()
         self.inp_vf_pass.setEchoMode(QLineEdit.EchoMode.Password)
         row.addWidget(self.inp_vf_pass)
-        v.addLayout(row)
+        left.addLayout(row)
 
         lbl_doc = QLabel('<a href="https://sede.agenciatributaria.gob.es/Sede/iva/sistemas-informaticos-facturacion-verifactu/informacion-tecnica.html" style="color:#4caf50;">Documentación técnica Verifactu (AEAT)</a>')
         lbl_doc.setOpenExternalLinks(True)
-        v.addWidget(lbl_doc)
+        left.addWidget(lbl_doc)
+        left.addStretch()
+
+        # Columna derecha: explicación
+        right = QVBoxLayout()
+        info_box = QFrame()
+        info_box.setStyleSheet("background:#1e1e1e; border:1px solid #3a3a3a; border-radius:10px;")
+        info_layout = QVBoxLayout(info_box)
+        info_layout.setContentsMargins(14, 14, 14, 14)
+        titulo = QLabel("¿Qué es Verifactu?")
+        titulo.setStyleSheet("font-size:16px; font-weight:bold; color:#4caf50;")
+        info_layout.addWidget(titulo)
+        texto = QLabel(
+            "Verifactu es el sistema de la Agencia Tributaria (AEAT) para que las facturas "
+            "se registren de forma segura e inalterable. Cuando lo activas, cada factura "
+            "genera un código QR que el cliente puede verificar en la web de Hacienda.\n\n"
+            "Es opcional: si no lo activas, tus facturas se guardan solo en tu ordenador.\n\n"
+            "¿Cómo añadir la firma digital?\n"
+            "1. Pide a tu asesor o a la AEAT el certificado digital de tu empresa "
+            "(un archivo .crt o .cer) y su clave privada (.key).\n"
+            "2. Pulsa \"Elegir\" junto a \"Certificado público\" y selecciona el archivo .crt/.cer.\n"
+            "3. Pulsa \"Elegir\" junto a \"Clave privada\" y selecciona el archivo .key.\n"
+            "4. Escribe la contraseña del certificado en el campo \"Contraseña\".\n"
+            "5. Marca \"Activar Verifactu\" y elige modo \"Prueba\" para probar primero.\n"
+            "6. Pulsa \"GUARDAR DATOS\".\n\n"
+            "Si no tienes certificado, deja Verifactu desactivado: el programa funciona igual "
+            "y genera facturas válidas en PDF."
+        )
+        texto.setWordWrap(True)
+        texto.setStyleSheet("font-size:13px; color:#dddddd;")
+        info_layout.addWidget(texto)
+        info_layout.addStretch()
+        right.addWidget(info_box)
+        right.addStretch()
+
+        p3.addLayout(left, 1)
+        p3.addLayout(right, 1)
+        self.pages.addWidget(page3)
+
+        v.addWidget(self.pages)
 
         # Botones
         row = QHBoxLayout()
@@ -148,7 +245,22 @@ class TabEmpresa(QWidget):
         v.addLayout(row)
         v.addStretch()
 
+        self._cambiar_pagina("Datos de empresa")
         self.cargar()
+
+    def _wrap(self, w):
+        h = QHBoxLayout()
+        h.addWidget(w)
+        return h
+
+    def _cambiar_pagina(self, nombre):
+        idx = {"Datos de empresa": 0, "Notas": 1, "Datos Verifactu": 2}[nombre]
+        self.pages.setCurrentIndex(idx)
+        for n, b in self.btns_submenu.items():
+            if n == nombre:
+                b.setStyleSheet("")  # default primary-ish
+            else:
+                pass
 
     def _validar_nif(self, texto):
         t = (texto or "").strip()
@@ -192,6 +304,8 @@ class TabEmpresa(QWidget):
             if idx >= 0: self.cmb_ccaa.setCurrentIndex(idx)
             self.inp_pais.setText(r["pais"] or "España")
             self.inp_registro.setText((r["registro_mercantil"] or "") if "registro_mercantil" in r.keys() else "")
+            if "notas" in r.keys():
+                self.inp_notas.setPlainText(r["notas"] or "")
             if r["logo_path"]:
                 self.logo_path = r["logo_path"]
                 pix = QPixmap(r["logo_path"]).scaled(120, 60)
@@ -227,14 +341,15 @@ class TabEmpresa(QWidget):
         conn.execute("""UPDATE empresa SET nombre=?, nif=?, direccion=?, cp=?, ciudad=?,
                         comunidad_autonoma=?, pais=?, logo_path=?, verifactu_enabled=?, verifactu_mode=?,
                         verifactu_cert_path=?, verifactu_key_path=?, verifactu_cert_password=?,
-                        registro_mercantil=?, actualizado_en=datetime('now','localtime') WHERE id=1""",
+                        registro_mercantil=?, notas=?, actualizado_en=datetime('now','localtime') WHERE id=1""",
                     (self.inp_nombre.text().strip(), self.inp_nif.text().strip(),
                      self.inp_dir.text().strip(), self.inp_cp.text().strip(),
                      self.inp_ciudad.text().strip(), self.cmb_ccaa.currentText(),
                      self.inp_pais.text().strip(), self.logo_path,
                      1 if self.chk_verifactu.isChecked() else 0, mode,
                      self.inp_vf_cert.text().strip(), self.inp_vf_key.text().strip(),
-                     self.inp_vf_pass.text(), self.inp_registro.text().strip()))
+                     self.inp_vf_pass.text(), self.inp_registro.text().strip(),
+                     self.inp_notas.toPlainText().strip()))
         # Reconfigurar tipos de IVA
         conn.execute("UPDATE tipos_iva SET activo=0")
         orden = 1
@@ -245,7 +360,6 @@ class TabEmpresa(QWidget):
                 pct = float(part)
             except ValueError:
                 continue
-            # insertar o reactivar
             cur = conn.execute("SELECT id FROM tipos_iva WHERE porcentaje=?", (pct,))
             r = cur.fetchone()
             if r:
