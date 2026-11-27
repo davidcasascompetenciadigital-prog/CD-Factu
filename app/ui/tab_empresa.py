@@ -33,21 +33,24 @@ class TabEmpresa(QWidget):
 
         # --- Submenú ---
         submenu = QHBoxLayout()
-        submenu.setSpacing(8)
+        submenu.setSpacing(12)
+        submenu.addStretch()
         self.btns_submenu = {}
         self.pages = QStackedWidget()
         for nombre in ("Datos de empresa", "Notas", "Datos Verifactu"):
             col = QVBoxLayout()
             col.setSpacing(4)
             b = big_button(nombre, "secondary")
-            b.setFixedWidth(170)
+            b.setFixedWidth(150)
+            b.setFixedHeight(36)
+            b.setStyleSheet(b.styleSheet() + "font-size:13px;")
             b.clicked.connect(lambda checked=False, n=nombre: self._cambiar_pagina(n))
             col.addWidget(b, alignment=Qt.AlignmentFlag.AlignCenter)
             lbl = QLabel(EXPLICACIONES[nombre])
             lbl.setWordWrap(True)
-            lbl.setStyleSheet("font-size:11px; color:#aaaaaa;")
+            lbl.setStyleSheet("font-size:10px; color:#aaaaaa;")
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            lbl.setFixedWidth(190)
+            lbl.setFixedWidth(170)
             col.addWidget(lbl, alignment=Qt.AlignmentFlag.AlignCenter)
             submenu.addLayout(col)
             self.btns_submenu[nombre] = b
@@ -56,14 +59,18 @@ class TabEmpresa(QWidget):
 
         # --- Página 1: Datos de empresa ---
         page1 = QWidget()
-        p1 = QVBoxLayout(page1)
-        p1.setSpacing(8)
+        p1 = QHBoxLayout(page1)
+        p1.setSpacing(16)
+
+        # Columna izquierda
+        left = QVBoxLayout()
+        left.setSpacing(8)
 
         row = QHBoxLayout()
         row.addWidget(QLabel("Nombre o razón social:"))
         self.inp_nombre = QLineEdit()
         row.addWidget(self.inp_nombre)
-        p1.addLayout(row)
+        left.addLayout(row)
 
         row = QHBoxLayout()
         row.addWidget(QLabel("NIF/CIF:"))
@@ -73,38 +80,44 @@ class TabEmpresa(QWidget):
         row.addWidget(self.inp_nif)
         self.lbl_nif_status = QLabel("")
         row.addWidget(self.lbl_nif_status)
-        p1.addLayout(row)
+        left.addLayout(row)
 
         row = QHBoxLayout()
         row.addWidget(QLabel("Dirección:"))
         self.inp_dir = QLineEdit()
         row.addWidget(self.inp_dir)
-        p1.addLayout(row)
+        left.addLayout(row)
 
         row = QHBoxLayout()
         row.addWidget(QLabel("Código Postal:"))
         self.inp_cp = QLineEdit()
         row.addWidget(self.inp_cp)
-        p1.addLayout(row)
+        left.addLayout(row)
 
         row = QHBoxLayout()
         row.addWidget(QLabel("Ciudad:"))
         self.inp_ciudad = QLineEdit()
         row.addWidget(self.inp_ciudad)
-        p1.addLayout(row)
+        left.addLayout(row)
+
+        left.addStretch()
+
+        # Columna derecha
+        right = QVBoxLayout()
+        right.setSpacing(8)
 
         row = QHBoxLayout()
         row.addWidget(QLabel("Comunidad Autónoma:"))
         self.cmb_ccaa = QComboBox()
         self.cmb_ccaa.addItems(COMUNIDADES)
         row.addWidget(self.cmb_ccaa)
-        p1.addLayout(row)
+        right.addLayout(row)
 
         row = QHBoxLayout()
         row.addWidget(QLabel("País:"))
         self.inp_pais = QLineEdit("España")
         row.addWidget(self.inp_pais)
-        p1.addLayout(row)
+        right.addLayout(row)
 
         # Logotipo
         row = QHBoxLayout()
@@ -112,26 +125,29 @@ class TabEmpresa(QWidget):
         self.lbl_logo.setFixedSize(120, 60)
         self.lbl_logo.setStyleSheet("border:1px solid #bdbdbd; background:#fff;")
         row.addWidget(self.lbl_logo)
-        btn_logo = big_button("Elegir imagen", "secondary")
+        btn_logo = big_button("Elegir logotipo", "secondary")
         btn_logo.clicked.connect(self.elegir_logo)
         row.addWidget(btn_logo)
         row.addStretch()
-        p1.addLayout(row)
+        right.addLayout(row)
         self.logo_path = None
 
         # Tipos de IVA
-        p1.addWidget(QLabel("Tipos de IVA que usas (separados por coma, ej: 21,10,4,0):"))
+        right.addWidget(QLabel("Tipos de IVA (separados por coma, ej: 21,10,4,0):"))
         self.inp_iva = QLineEdit("21,10,4,0")
-        p1.addLayout(self._wrap(self.inp_iva))
+        right.addLayout(self._wrap(self.inp_iva))
 
         # Registro Mercantil
         row = QHBoxLayout()
-        row.addWidget(QLabel("Registro Mercantil (tomo, libro, folio, hoja, inscripción):"))
+        row.addWidget(QLabel("Registro Mercantil:"))
         self.inp_registro = QLineEdit()
         row.addWidget(self.inp_registro)
-        p1.addLayout(row)
+        right.addLayout(row)
 
-        p1.addStretch()
+        right.addStretch()
+
+        p1.addLayout(left, 1)
+        p1.addLayout(right, 1)
         self.pages.addWidget(page1)
 
         # --- Página 2: Notas ---
