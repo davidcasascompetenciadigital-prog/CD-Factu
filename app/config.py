@@ -1,21 +1,12 @@
-﻿# app/config.py
+# app/config.py
 import os
 from pathlib import Path
 
+# Carpeta de datos del usuario (Windows: %APPDATA%\ClamGuardFacturas)
 APP_NAME = "CD Factu"
-
-# Carpeta de datos del usuario según plataforma
-if os.name == "nt":
-    _data_base = Path(os.environ.get("APPDATA", Path.home()))
-else:
-    _data_base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
-
-DATA_DIR = _data_base / APP_NAME
+DATA_DIR = Path(os.environ.get("APPDATA", Path.home())) / APP_NAME
 DB_PATH = DATA_DIR / "facturas.db"
-
-# Carpeta de copias de seguridad: Escritorio si existe, si no el home
-_desktop = Path.home() / "Desktop"
-BACKUP_DIR = (_desktop if _desktop.exists() else Path.home()) / "Backup_Facturas"
+BACKUP_DIR = Path.home() / "Desktop" / "Backup_Facturas"
 FACTURAS_DIR = DATA_DIR / "Facturas"
 LOGO_DIR = DATA_DIR / "logos"
 
@@ -42,3 +33,11 @@ COLOR_GRAY  = "#757575"   # cancelar
 COLOR_RED   = "#c62828"   # avisos
 COLOR_BG    = "#f5f5f5"
 COLOR_CARD  = "#ffffff"
+
+
+# --- Datos del sistema informatico de facturacion (SIF) -> bloque <SistemaInformatico> del registro Verifactu
+APP_VERSION = "0.0.2"
+SISTEMA_NOMBRE = "CD Factu"
+SISTEMA_ID = "CD"                     # identificador del SIF (2 caracteres)
+PRODUCTOR_NOMBRE = "David Casas M."   # razon social del productor del software
+PRODUCTOR_NIF = ""                    # <-- NIF del productor del software (obligatorio para enviar a la AEAT)

@@ -1,7 +1,7 @@
 # app/ui/tab_emitir.py
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
                                QComboBox, QPushButton, QTableWidget, QTableWidgetItem,
-                               QHeaderView, QMessageBox, QDialog, QListWidget, QListWidgetItem)
+                               QHeaderView, QMessageBox, QDialog, QListWidget, QListWidgetItem, QTextEdit)
 from PySide6.QtCore import Qt
 from datetime import date
 import os
@@ -116,6 +116,69 @@ class SelectorProductoDialog(QDialog):
         it = self.lista.currentItem()
         return it.data(Qt.ItemDataRole.UserRole) if it else None
 
+class SelectorServicioDialog(QDialog):
+    """Elige un servicio y permite ajustar su descripcion antes de anadirlo a la factura."""
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowTitle("Elegir servicio")
+        self.setMinimumSize(640, 520)
+        v = QVBoxLayout(self)
+        self.lista = QListWidget()
+        self.lista.setMaximumHeight(170)
+        v.addWidget(self.lista)
+        v.addWidget(QLabel("Descripción en la factura (puedes editarla solo para esta factura):"))
+        self.txt = QTextEdit()
+        self.txt.setAcceptRichText(False)
+        v.addWidget(self.txt, 1)
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Importe base (sin IVA):"))
+        self.inp_base = QLineEdit()
+        row.addWidget(self.inp_base)
+        row.addWidget(QLabel("€"))
+        v.addLayout(row)
+        btn = big_button("Añadir a la factura", "primary")
+        btn.clicked.connect(self._aceptar)
+        v.addWidget(btn)
+        conn = get_connection()
+        rows = conn.execute("""SELECT s.id, s.titulo, s.descripcion, s.importe_base, t.porcentaje, t.id AS iva_id
+                               FROM servicios s LEFT JOIN tipos_iva t ON t.id=s.tipo_iva_id
+                               WHERE s.activo=1 ORDER BY s.titulo""").fetchall()
+        conn.close()
+        for r in rows:
+            d = dict(r)
+            if d["porcentaje"] is None:
+                d["porcentaje"] = 21.0
+            item = QListWidgetItem(f"{d['titulo']}  |  {d['importe_base']:.2f} €  |  IVA {d['porcentaje']:g}%")
+            item.setData(Qt.ItemDataRole.UserRole, d)
+            self.lista.addItem(item)
+        self.lista.currentItemChanged.connect(self._cambio)
+        self._sel = None
+
+    def _cambio(self, cur, prev):
+        if not cur:
+            return
+        d = cur.data(Qt.ItemDataRole.UserRole)
+        self._sel = d
+        self.txt.setPlainText(d["descripcion"] or "")
+        self.inp_base.setText(f"{d['importe_base']:.2f}".replace(".", ","))
+
+    def _aceptar(self):
+        if not self._sel:
+            error(self, "Elige un servicio de la lista.")
+            return
+        try:
+            float(self.inp_base.text().replace(",", "."))
+        except ValueError:
+            error(self, "El importe base debe ser un número.")
+            return
+        self.accept()
+
+    def resultado(self):
+        d = dict(self._sel)
+        d["descripcion"] = self.txt.toPlainText().strip()
+        d["importe_base"] = float(self.inp_base.text().replace(",", "."))
+        return d
+
 class TabEmitir(QWidget):
     def __init__(self, parent):
         super().__init__(parent)
@@ -123,52 +186,70 @@ class TabEmitir(QWidget):
         self.cliente_id = None
         self.cliente_data = None
         self.lineas = []
-        outer = QHBoxLayout(self)
-        outer.setSpacing(16)
-
-        # ===== Columna izquierda: formulario =====
-        left = QVBoxLayout()
-        left.setSpacing(10)
-        left.addWidget(title_label("Emitir factura"))
+        v = QVBoxLayout(self)
+        v.setSpacing(10)
+        v.addWidget(title_label("Emitir factura"))
 
         # 1. Cliente
-        left.addWidget(QLabel("1. Cliente:"))
+        v.addWidget(QLabel("1. Cliente:"))
         row = QHBoxLayout()
         self.lbl_cliente = QLabel("Ningún cliente seleccionado")
-        self.lbl_cliente.setStyleSheet("font-size:16px; padding:8px; background:#fff; border:1px solid #bdbdbd; border-radius:6px;")
+        self.lbl_cliente.setStyleSheet("font-size:16px; padding:8px; background:#2a2a2a; border:1px solid #3a3a3a; border-radius:6px;")
         row.addWidget(self.lbl_cliente, 1)
         btn_sel = big_button("Elegir cliente", "primary")
         btn_sel.clicked.connect(self.elegir_cliente)
         row.addWidget(btn_sel)
-        left.addLayout(row)
+        v.addLayout(row)
 
         # 2. Líneas
-        left.addWidget(QLabel("2. Líneas de factura:"))
+        v.addWidget(QLabel("2. Líneas de factura:"))
         row = QHBoxLayout()
         btn_prod = big_button("Añadir producto de la lista", "primary")
         btn_prod.clicked.connect(self.add_producto)
         row.addWidget(btn_prod)
+        btn_serv = big_button("Añadir servicio", "primary")
+        btn_serv.clicked.connect(self.add_servicio)
+        row.addWidget(btn_serv)
         btn_manual = big_button("Escribir línea a mano", "secondary")
         btn_manual.clicked.connect(self.add_manual)
         row.addWidget(btn_manual)
         row.addStretch()
-        left.addLayout(row)
+        v.addLayout(row)
 
         self.tabla = QTableWidget(0, 5)
         self.tabla.setHorizontalHeaderLabels(["Concepto", "Base", "IVA", "Total línea", ""])
         self.tabla.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setMinimumHeight(180)
-        left.addWidget(self.tabla)
+        v.addWidget(self.tabla)
+
+        # 3. Resumen
+        v.addWidget(QLabel("3. Resumen automático:"))
+        self.lbl_base = QLabel("Base imponible total: 0,00 €")
+        self.lbl_iva = QLabel("IVA: 0,00 €")
+        self.lbl_desglose = QLabel("")
+        self.lbl_total = QLabel("Total factura: 0,00 €")
+        self.lbl_total.setStyleSheet("font-size:20px; font-weight:bold;")
+        # Resumen alineado a la derecha
+        resumen = QWidget()
+        rv = QVBoxLayout(resumen)
+        rv.setContentsMargins(0, 0, 0, 0)
+        for l in (self.lbl_base, self.lbl_iva, self.lbl_desglose, self.lbl_total):
+            l.setAlignment(Qt.AlignmentFlag.AlignRight)
+            rv.addWidget(l)
+        fila_resumen = QHBoxLayout()
+        fila_resumen.addStretch()
+        fila_resumen.addWidget(resumen)
+        v.addLayout(fila_resumen)
 
         # 4. Estado de cobro
-        left.addWidget(QLabel("4. Estado de cobro inicial:"))
+        v.addWidget(QLabel("4. Estado de cobro inicial:"))
         row = QHBoxLayout()
         self.cmb_cobro = QComboBox()
         self.cmb_cobro.addItems(["No cobrada", "Cobrada totalmente", "Cobrada parcialmente"])
         row.addWidget(self.cmb_cobro)
         row.addStretch()
-        left.addLayout(row)
+        v.addLayout(row)
 
         # Campos pago (mini-formulario) visibles si cobrada
         self.pago_frame = QWidget()
@@ -185,7 +266,25 @@ class TabEmitir(QWidget):
         pf.addLayout(r)
         self.pago_frame.setVisible(False)
         self.cmb_cobro.currentTextChanged.connect(lambda t: self.pago_frame.setVisible(t != "No cobrada"))
-        left.addWidget(self.pago_frame)
+        v.addWidget(self.pago_frame)
+
+        # 5. Verifactu
+        v.addWidget(QLabel("5. Verifactu (Agencia Tributaria):"))
+        row = QHBoxLayout()
+        self.cmb_vf = QComboBox()
+        self.cmb_vf.addItem("No enviar ahora", "no")
+        self.cmb_vf.addItem("Ver vista previa Verifactu (no se envía)", "previa")
+        self.cmb_vf.addItem("Enviar al entorno de PRUEBAS de la AEAT", "pruebas")
+        self.cmb_vf.addItem("Enviar a la AEAT (REAL)", "real")
+        self.cmb_vf.setMinimumWidth(420)
+        row.addWidget(self.cmb_vf)
+        self.lbl_vf = QLabel("")
+        self.lbl_vf.setStyleSheet("color:#aaaaaa; font-size:13px;")
+        row.addWidget(self.lbl_vf)
+        row.addStretch()
+        v.addLayout(row)
+        self.cmb_vf.currentIndexChanged.connect(self._aviso_vf)
+        self._vf_por_defecto()
 
         # Botones
         row = QHBoxLayout()
@@ -196,32 +295,27 @@ class TabEmitir(QWidget):
         btn_help.clicked.connect(lambda: help_popup(self, ayuda("emitir")))
         row.addWidget(btn_help)
         row.addStretch()
-        left.addLayout(row)
-        left.addStretch()
+        v.addLayout(row)
+        v.addStretch()
 
-        # ===== Columna derecha: resumen automático =====
-        right = QVBoxLayout()
-        right.setSpacing(10)
-        right.addWidget(QLabel("3. Resumen automático:"))
-        from PySide6.QtWidgets import QFrame
-        box = QFrame()
-        box.setStyleSheet("background:#1e1e1e; border:1px solid #3a3a3a; border-radius:10px;")
-        bv = QVBoxLayout(box)
-        bv.setContentsMargins(14, 14, 14, 14)
-        self.lbl_base = QLabel("Base imponible total: 0,00 €")
-        self.lbl_iva = QLabel("IVA: 0,00 €")
-        self.lbl_desglose = QLabel("")
-        self.lbl_total = QLabel("Total factura: 0,00 €")
-        self.lbl_total.setStyleSheet("font-size:20px; font-weight:bold; color:#4caf50;")
-        for l in (self.lbl_base, self.lbl_iva, self.lbl_desglose, self.lbl_total):
-            l.setAlignment(Qt.AlignmentFlag.AlignRight)
-            bv.addWidget(l)
-        bv.addStretch()
-        right.addWidget(box)
-        right.addStretch()
+    def _vf_por_defecto(self):
+        """Preselecciona segun la configuracion de empresa (nunca envia sin pedir confirmacion)."""
+        try:
+            conn = get_connection()
+            r = conn.execute("SELECT verifactu_enabled, verifactu_mode FROM empresa WHERE id=1").fetchone()
+            conn.close()
+            if r and r["verifactu_enabled"]:
+                self.cmb_vf.setCurrentIndex(self.cmb_vf.findData("real" if r["verifactu_mode"] == "real" else "pruebas"))
+        except Exception:
+            pass
+        self._aviso_vf()
 
-        outer.addLayout(left, 2)
-        outer.addLayout(right, 1)
+    def _aviso_vf(self, *_):
+        d = self.cmb_vf.currentData()
+        self.lbl_vf.setText({"no": "Podrás hacerlo después desde «Facturas emitidas».",
+                             "previa": "Se abrirá una vista previa con el QR; no se guarda ni se envía.",
+                             "pruebas": "Sin efectos fiscales. Pide confirmación.",
+                             "real": "Registro REAL en la AEAT. Pide doble confirmación."}.get(d, ""))
 
     def elegir_cliente(self):
         dlg = SelectorClienteDialog(self)
@@ -254,6 +348,19 @@ class TabEmitir(QWidget):
             self.lineas.append(linea)
             self.refrescar_tabla()
             self.recalcular_resumen()
+
+    def add_servicio(self):
+        dlg = SelectorServicioDialog(self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        d = dlg.resultado()
+        concepto = d["titulo"] + (("\n" + d["descripcion"]) if d["descripcion"] else "")
+        linea = LineaFactura(concepto=concepto, cantidad=1.0, importe_base=d["importe_base"],
+                             porcentaje_iva=float(d["porcentaje"]), tipo_iva_id=d["iva_id"])
+        linea.recalcular()
+        self.lineas.append(linea)
+        self.refrescar_tabla()
+        self.recalcular_resumen()
 
     def add_manual(self):
         # mini dialog inline: ask concepto, base, iva
@@ -299,7 +406,7 @@ class TabEmitir(QWidget):
         self.tabla.setRowCount(0)
         for i, l in enumerate(self.lineas):
             self.tabla.insertRow(i)
-            self.tabla.setItem(i, 0, QTableWidgetItem(l.concepto))
+            self.tabla.setItem(i, 0, QTableWidgetItem(l.concepto.split("\n", 1)[0]))
             self.tabla.setItem(i, 1, QTableWidgetItem(f"{l.base_linea:.2f} €"))
             self.tabla.setItem(i, 2, QTableWidgetItem(f"{l.porcentaje_iva:g}%"))
             self.tabla.setItem(i, 3, QTableWidgetItem(f"{l.total_linea:.2f} €"))
@@ -426,45 +533,27 @@ class TabEmitir(QWidget):
         e.registro_mercantil = er["registro_mercantil"] if "registro_mercantil" in er.keys() else None
         f.numero = numero
         f.fecha_emision = date.today().isoformat()
-
+        generar_pdf_factura(f, e, c, f.lineas, f.desglose_iva, str(qr_path), str(pdf_path))
+        conn.execute("UPDATE facturas SET pdf_path=? WHERE id=?", (str(pdf_path), factura_id))
         # estado cobro inicial
-        estado_cobro = "no_cobrada"
-        pendiente = f.total_factura
-        cobros_list = []
-        estado_txt = self.cmb_cobro.currentText()
-        if estado_txt == "Cobrada totalmente":
+        estado = self.cmb_cobro.currentText()
+        if estado == "Cobrada totalmente":
             imp = f.total_factura
-            fecha_cobro = date.today().isoformat()
             conn.execute("""INSERT INTO cobros (factura_id, fecha_cobro, importe, forma_pago) VALUES (?,?,?,?)""",
-                         (factura_id, fecha_cobro, imp, self.cmb_forma.currentText()))
-            estado_cobro = "pagada"
-            pendiente = 0.0
-            cobros_list.append({"fecha": fecha_cobro, "importe": imp, "forma_pago": self.cmb_forma.currentText()})
+                         (factura_id, date.today().isoformat(), imp, self.cmb_forma.currentText()))
             conn.execute("UPDATE facturas SET estado_cobro='pagada', pendiente=0 WHERE id=?", (factura_id,))
-        elif estado_txt == "Cobrada parcialmente":
+        elif estado == "Cobrada parcialmente":
             try:
                 imp = float(self.inp_importe_cobro.text().replace(",", "."))
             except ValueError:
                 imp = f.total_factura
-            fecha_cobro = self.inp_fecha_cobro.text() or date.today().isoformat()
             conn.execute("""INSERT INTO cobros (factura_id, fecha_cobro, importe, forma_pago) VALUES (?,?,?,?)""",
-                         (factura_id, fecha_cobro, imp, self.cmb_forma.currentText()))
+                         (factura_id, self.inp_fecha_cobro.text() or date.today().isoformat(),
+                          imp, self.cmb_forma.currentText()))
             pend = round(f.total_factura - imp, 2)
             nuevo_estado = "pagada" if pend <= 0 else "parcial"
-            estado_cobro = nuevo_estado
-            pendiente = max(pend, 0)
-            cobros_list.append({"fecha": fecha_cobro, "importe": imp, "forma_pago": self.cmb_forma.currentText()})
             conn.execute("UPDATE facturas SET estado_cobro=?, pendiente=? WHERE id=?",
                          (nuevo_estado, max(pend, 0), factura_id))
-        conn.commit()
-
-        # datos de cobro para el PDF
-        f.estado_cobro = estado_cobro
-        f.pendiente = pendiente
-        f.cobros = cobros_list
-
-        generar_pdf_factura(f, e, c, f.lineas, f.desglose_iva, str(qr_path), str(pdf_path))
-        conn.execute("UPDATE facturas SET pdf_path=? WHERE id=?", (str(pdf_path), factura_id))
         conn.commit()
         conn.close()
 
@@ -475,6 +564,7 @@ class TabEmitir(QWidget):
             pass
 
         info(self, MSG_FACTURA_GUARDADA)
+        opcion_vf = self.cmb_vf.currentData()
         # reset
         self.lineas = []
         self.cliente_id = None
@@ -488,5 +578,18 @@ class TabEmitir(QWidget):
         try:
             self.parent.tab_facturas.refrescar()
             self.parent.tab_cobros.refrescar()
+            self.parent.tab_balance.refrescar()
         except Exception:
             pass
+        # Verifactu segun lo elegido (la factura ya esta emitida y guardada)
+        if opcion_vf != "no":
+            try:
+                from .dialog_verifactu import VerifactuDialog
+                dlg = VerifactuDialog(self.parent, factura_id)
+                if opcion_vf == "previa":
+                    dlg.vista_previa()
+                else:
+                    dlg.enviar(opcion_vf)
+                dlg.exec()
+            except Exception as e:
+                error(self, f"La factura se emitió correctamente, pero Verifactu falló: {e}")

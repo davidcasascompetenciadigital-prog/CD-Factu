@@ -43,6 +43,25 @@ def seed_sample_data() -> str:
             conn.execute("""INSERT INTO productos (referencia, nombre, importe_base, tipo_iva_id) VALUES (?,?,?,?)""",
                          (p[0], p[1], p[2], p[3]))
 
+    # Servicio de ejemplo
+    if conn.execute("SELECT COUNT(*) c FROM servicios").fetchone()["c"] == 0:
+        t21 = conn.execute("SELECT id FROM tipos_iva WHERE porcentaje=21").fetchone()["id"]
+        conn.execute("""INSERT INTO servicios (titulo, descripcion, importe_base, tipo_iva_id) VALUES (?,?,?,?)""",
+                     ("Informe pericial",
+                      "Informe pericial de tercero encargado por el Juzgado de Murcia, sección de Primera Instancia, "
+                      "sobre la valoración de una serie de daños producidos en su inmueble.", 450.0, t21))
+
+    # Gastos de ejemplo (para el balance trimestral)
+    if conn.execute("SELECT COUNT(*) c FROM gastos").fetchone()["c"] == 0:
+        hoy = date.today().isoformat()
+        for prov, nif, base, pct in [("Papelería Central S.L.", "B12345674", 80.0, 21.0),
+                                     ("Gestoría Ejemplo", "B76543214", 120.0, 21.0),
+                                     ("Librería Técnica", "B12345674", 45.0, 4.0)]:
+            cuota = round(base * pct / 100.0, 2)
+            conn.execute("""INSERT INTO gastos (fecha, proveedor, nif_proveedor, concepto, base, porcentaje_iva,
+                            cuota_iva, total, iva_deducible, pagado) VALUES (?,?,?,?,?,?,?,?,1,1)""",
+                         (hoy, prov, nif, "Gasto de ejemplo", base, pct, cuota, round(base + cuota, 2)))
+
     # Facturas de ejemplo (solo si no hay)
     if conn.execute("SELECT COUNT(*) c FROM facturas").fetchone()["c"] == 0:
         emp = conn.execute("SELECT nif FROM empresa WHERE id=1").fetchone()

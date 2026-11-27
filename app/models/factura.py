@@ -35,7 +35,6 @@ class Factura:
     estado: str = "emitida"
     estado_cobro: str = "no_cobrada"
     pendiente: float = 0.0
-    cobros: list = field(default_factory=list)  # lista de dicts: fecha, importe, forma_pago
     pdf_path: Optional[str] = None
     hash_registro: str = ""
     hash_anterior: Optional[str] = None

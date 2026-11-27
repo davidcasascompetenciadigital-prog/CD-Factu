@@ -15,6 +15,3 @@ appdata/
 
 # Assets keep? keep assets
 "
-# AppImage
-*.AppImage
-AppDir/

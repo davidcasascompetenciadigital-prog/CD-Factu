@@ -13,7 +13,7 @@ def big_button(text, role="primary"):
 
 def title_label(text):
     l = QLabel(text)
-    l.setStyleSheet(f"font-size: {FONT_SIZE_TITLE}px; font-weight: bold; color: #212121;")
+    l.setStyleSheet(f"font-size: {FONT_SIZE_TITLE}px; font-weight: bold; color: #f5f5f5;")
     return l
 
 def help_popup(parent, texto):
