@@ -2,14 +2,16 @@
 from PySide6.QtWidgets import (QMainWindow, QStackedWidget, QWidget, QVBoxLayout,
                                QHBoxLayout, QLabel, QPushButton, QGridLayout, QMessageBox)
 from PySide6.QtCore import Qt
+from pathlib import Path
 from PySide6.QtGui import QPixmap, QIcon
 
-from ..config import resource_path
+from ..config import resource_path, BACKUP_DIR
 from ..db.database import get_connection
 from ..ui.styles import GLOBAL_QSS
 from ..ui.widgets import title_label, big_button, help_popup, info
 from ..utils.messages import ayuda
 from ..services.sample_data import seed_sample_data
+from ..services.backup import backup_semanal, listar_backups, restaurar_backup
 
 from .tab_empresa import TabEmpresa
 from .tab_clientes import TabClientes
@@ -28,30 +30,35 @@ PAGES = [
 ]
 
 class MenuCard(QWidget):
+    """Ficha única: icono + nombre de la función + concepto en un solo recuadro."""
     clicked = None
     def __init__(self, icono, titulo, descripcion, callback):
         super().__init__()
         self.callback = callback
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setStyleSheet("QFrame { background:#2a2a2a; border:2px solid #3a3a3a; border-radius:12px; }")
-        v = QVBoxLayout(self)
-        v.setSpacing(6)
-        v.setContentsMargins(16, 16, 16, 16)
+        self.setStyleSheet("QWidget#card { background:#2a2a2a; border:2px solid #3a3a3a; border-radius:12px; }"
+                          "QWidget#card:hover { border:2px solid #4caf50; }")
+        self.setObjectName("card")
+        h = QHBoxLayout(self)
+        h.setSpacing(14)
+        h.setContentsMargins(16, 12, 16, 12)
         lbl_icon = QLabel(icono)
-        lbl_icon.setStyleSheet("font-size:40px;")
+        lbl_icon.setStyleSheet("font-size:44px;")
         lbl_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        v.addWidget(lbl_icon)
+        lbl_icon.setFixedWidth(60)
+        h.addWidget(lbl_icon)
+        v = QVBoxLayout()
+        v.setSpacing(2)
         lbl_tit = QLabel(titulo)
         lbl_tit.setStyleSheet("font-size:18px; font-weight:bold; color:#f5f5f5;")
-        lbl_tit.setAlignment(Qt.AlignmentFlag.AlignCenter)
         v.addWidget(lbl_tit)
         lbl_desc = QLabel(descripcion)
         lbl_desc.setStyleSheet("font-size:13px; color:#aaaaaa;")
-        lbl_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_desc.setWordWrap(True)
         v.addWidget(lbl_desc)
-        self.setMinimumHeight(140)
-        self.setMinimumWidth(260)
+        h.addLayout(v, 1)
+        self.setMinimumHeight(90)
+        self.setMinimumWidth(320)
 
     def mousePressEvent(self, event):
         if self.callback:
@@ -119,10 +126,20 @@ class MainWindow(QMainWindow):
         btn_menu.setFixedWidth(150)
         btn_menu.clicked.connect(lambda: self.stack.setCurrentIndex(0))
         header.addWidget(btn_menu)
-        btn_sample = big_button("Datos de ejemplo", "secondary")
-        btn_sample.setFixedWidth(160)
-        btn_sample.clicked.connect(self.cargar_ejemplos)
-        header.addWidget(btn_sample)
+        self.btn_sample = big_button("Datos de ejemplo", "secondary")
+        self.btn_sample.setFixedWidth(160)
+        self.btn_sample.clicked.connect(self.cargar_ejemplos)
+        header.addWidget(self.btn_sample)
+
+        btn_backup = big_button("Backup", "secondary")
+        btn_backup.setFixedWidth(110)
+        btn_backup.clicked.connect(self.hacer_backup)
+        header.addWidget(btn_backup)
+
+        btn_restore = big_button("Restaurar", "secondary")
+        btn_restore.setFixedWidth(120)
+        btn_restore.clicked.connect(self.restaurar_backup_ui)
+        header.addWidget(btn_restore)
         btn_about = big_button("Acerca de", "secondary")
         btn_about.setFixedWidth(120)
         btn_about.clicked.connect(self.mostrar_acerca_de)
@@ -171,6 +188,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(self.footer)
 
         self.actualizar_footer()
+        self.actualizar_boton_ejemplos()
         self.stack.setCurrentIndex(0)
         # Primera ejecución: preguntar si se desean datos de ejemplo
         try:
@@ -185,6 +203,7 @@ class MainWindow(QMainWindow):
                                          QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
                 if r == QMessageBox.StandardButton.Yes:
                     self.cargar_ejemplos()
+                self.actualizar_boton_ejemplos()
         except Exception:
             pass
 
@@ -224,8 +243,51 @@ class MainWindow(QMainWindow):
             try: self.tab_empresa.cargar()
             except Exception: pass
             info(self, msg)
+            self.actualizar_boton_ejemplos()
         except Exception as e:
             error(self, f"No se pudieron cargar los datos de ejemplo: {e}")
+
+    def actualizar_boton_ejemplos(self):
+        try:
+            conn = get_connection()
+            n_cli = conn.execute("SELECT COUNT(*) AS c FROM clientes").fetchone()["c"]
+            n_fac = conn.execute("SELECT COUNT(*) AS c FROM facturas").fetchone()["c"]
+            conn.close()
+            if n_cli > 0 or n_fac > 0:
+                self.btn_sample.hide()
+            else:
+                self.btn_sample.show()
+        except Exception:
+            pass
+
+    def hacer_backup(self):
+        from ..ui.widgets import info, error
+        try:
+            p = backup_semanal()
+            info(self, f"Copia de seguridad creada:\n{p}")
+        except Exception as e:
+            error(self, f"No se pudo crear la copia de seguridad: {e}")
+
+    def restaurar_backup_ui(self):
+        from ..ui.widgets import confirm, info, error
+        from PySide6.QtWidgets import QFileDialog
+        backups = listar_backups()
+        if backups:
+            carpeta = str(BACKUP_DIR)
+        else:
+            carpeta = str(Path.home())
+        path, _ = QFileDialog.getOpenFileName(self, "Seleccionar copia de seguridad", carpeta,
+                                            "Base de datos (*.db);;Todos los archivos (*)")
+        if not path:
+            return
+        if not confirm(self, "¿Restaurar la copia de seguridad seleccionada?\n"
+                            "Se creará una copia de la BD actual antes de restaurar.\n"
+                            "Será necesario reiniciar el programa."):
+            return
+        if restaurar_backup(Path(path)):
+            info(self, "Copia restaurada correctamente. Reinicie el programa para aplicar los cambios.")
+        else:
+            error(self, "No se pudo restaurar la copia de seguridad.")
 
     def mostrar_acerca_de(self):
         from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton
